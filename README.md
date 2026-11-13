@@ -1,5 +1,9 @@
 # HostsKeeper
 
+<p align="center">
+  <img src="src/hostskeeper/resources/hostskeeper.png" alt="HostsKeeper" width="128" height="128">
+</p>
+
 **Local credential vault + human-gated SSH tabs for MCP/AI — not a generic remote desktop.**
 
 HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You** open SSH sessions in tabs. An AI client (e.g. Cursor) attaches only to tabs you enable for MCP — it never opens SSH itself and never receives passwords, keys, or host addresses.

@@ -62,11 +62,18 @@ for pkg in ("uvicorn", "starlette"):
     except Exception:
         pass
 
+_ICON = SRC / "hostskeeper" / "resources" / "hostskeeper.ico"
+
 a = Analysis(
     [str(SRC / "hostskeeper" / "__main__.py")],
     pathex=[str(SRC)],
     binaries=[],
-    datas=[],
+    datas=[
+        (
+            str(SRC / "hostskeeper" / "resources" / "hostskeeper.ico"),
+            "hostskeeper/resources",
+        ),
+    ],
     hiddenimports=sorted(set(hiddenimports)),
     hookspath=[],
     hooksconfig={},
@@ -134,4 +141,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(_ICON) if _ICON.is_file() else None,
 )

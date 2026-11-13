@@ -51,7 +51,9 @@ cd <path-to-HostsKeeper>
 ```
 
 Результат: `dist\HostsKeeper.exe` (PyInstaller `--onefile`, без консоли; ~60 MB без QtWebEngine).  
-Spec: `packaging/HostsKeeper.spec`. Зависимости сборки: `pip install -e ".[packaging]"`.
+Spec: `packaging/HostsKeeper.spec` (иконка: `src/hostskeeper/resources/hostskeeper.ico`).  
+Пересобрать иконку: `pip install pillow` → `python scripts/generate_app_icon.py`.  
+Зависимости сборки: `pip install -e ".[packaging]"`.
 
 Перед пересборкой закройте запущенный `HostsKeeper.exe` (иначе WinError 5 на запись).  
 Проверка: запуск exe → unlock → Open Tab → MCP / Copy MCP config.  

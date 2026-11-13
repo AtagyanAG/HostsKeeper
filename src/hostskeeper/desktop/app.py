@@ -6,9 +6,11 @@ import os
 import sys
 from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from hostskeeper.desktop.main_window import MainWindow
+from hostskeeper.resources import app_icon_path
 from hostskeeper.runtime.mcp_http import stop_mcp_http
 from hostskeeper.runtime.settings import AppSettings, default_vault_path
 from hostskeeper.runtime.state import AppState
@@ -49,6 +51,13 @@ def run_desktop(
 
     assert app is not None
 
+    icon_file = app_icon_path()
+    if icon_file is not None:
+        icon = QIcon(str(icon_file))
+        app.setWindowIcon(icon)
+    else:
+        icon = None
+
     def _on_quit() -> None:
         # Safety net if window closeEvent was skipped.
         stop_mcp_http()
@@ -57,6 +66,8 @@ def run_desktop(
 
     app.aboutToQuit.connect(_on_quit)
     window = MainWindow(state)
+    if icon is not None:
+        window.setWindowIcon(icon)
     window.show()
     if owns_app:
         return int(app.exec())
