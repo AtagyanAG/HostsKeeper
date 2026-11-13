@@ -34,6 +34,22 @@ HostsKeeper exposes MCP primarily as an **HTTP** endpoint with a stable **app ke
 
 **Trusted network only.** Intended for LAN or a **VPN / tunnel you operate yourself** (VPN setup is out of scope for this project). Do not expose the MCP port to the open internet without such a tunnel. **stdio** remains available as a same-machine alternative (no URL/key).
 
+## Screenshots
+
+Demo vault layout (fictional hosts / documentation IPs — see `scripts/seed_demo_vault.py`):
+
+<p align="center">
+  <img src="doc/images/demo-host-address.png" alt="Edit Host and Address" width="720">
+</p>
+
+<p align="center"><em>Workspace tree, Edit Host, and Address (optional port knocking)</em></p>
+
+<p align="center">
+  <img src="doc/images/demo-host-scripts.png" alt="Host Scripts and Edit Script" width="720">
+</p>
+
+<p align="center"><em>Host-local scripts and script editor</em></p>
+
 ## Download
 
 Windows single-file build: [Releases](https://github.com/AtagyanAG/HostsKeeper/releases) (`HostsKeeper.exe`).  

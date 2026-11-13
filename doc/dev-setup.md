@@ -59,6 +59,16 @@ Spec: `packaging/HostsKeeper.spec` (иконка: `src/hostskeeper/resources/hos
 Проверка: запуск exe → unlock → Open Tab → MCP / Copy MCP config.  
 Первый старт onefile медленнее (распаковка во temp). SmartScreen может ругаться на неподписанный бинарник.
 
+## Demo vault для скриншотов
+
+```powershell
+python scripts\seed_demo_vault.py
+python -m hostskeeper --vault data\demo-screenshots.vault
+```
+
+Пароль: `demo`. Файл в `data/` (gitignored). Пересоздать: `--force`.  
+Только вымышленные хосты/IP (RFC 5737) — не для реального SSH.
+
 ## Интеграционный SSH (опционально)
 
 Живые SSH-тесты (`tests/test_session_ssh_integration.py` и др.) **пропускаются**, пока не задан ключ. Ключ и адрес lab **не** хранятся в git.
