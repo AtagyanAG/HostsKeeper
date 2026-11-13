@@ -1,36 +1,34 @@
 # HostsKeeper
 
-Локальный Windows-сейф параметров подключений к хостам, библиотека shell-скриптов и встроенный MCP-сервер для удалённого ИИ.
+**Local credential vault + human-gated SSH tabs for MCP/AI — not a generic remote desktop.**
 
-Секреты остаются на ПК-сейфе. ИИ получает доступ только к явно открытым вкладкам терминала и к каталогу скриптов.
+HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You** open SSH sessions in tabs. An AI client (e.g. Cursor) attaches only to tabs you enable for MCP — it never opens SSH itself and never receives passwords, keys, or host addresses.
 
-**Лицензия:** [MIT](LICENSE). Сторонние зависимости — см. [NOTICE](NOTICE).
+| | |
+|---|---|
+| **For** | Ops / SRE / admins who use Cursor (or another MCP client) against real servers, but want secrets and connect decisions to stay human-side |
+| **Not for** | Replacing Termius/mRemoteNG as a general-purpose remote manager, or unattended bot SSH into production |
 
-HostsKeeper **не аффилирован** с авторами PuTTY, WinSCP или иных упомянутых в UI/доках внешних продуктов; при наличии они запускаются как уже установленные программы на машине пользователя и в этот репозиторий не входят.
+## How it works
 
-## Документация
+1. Unlock a local encrypted vault (hosts, addresses, credentials, scripts).
+2. Open an SSH **Tab** yourself (or launch installed PuTTY / WinSCP).
+3. Turn **MCP** on for that tab; once: toolbar **Copy MCP config** → paste into Cursor `mcp.json`.
+4. The model uses `session_list` → `session_attach(alias=…)`, then read / subscribe. **Approve** (off by default) is required for write / script run.
 
-См. каталог [doc/](doc/README.md):
+Secrets and IPs stay out of MCP payloads. Approve off = read-only for the model.
 
-- [Требования](doc/requirements.md)
-- [Архитектура](doc/architecture.md)
-- [Модель данных](doc/data-model.md)
-- [Контракт MCP](doc/mcp-api.md)
-- [План реализации](doc/implementation-plan.md)
-- [UI Guidelines (connection manager)](doc/ui-guidelines.md)
-- [Миграция UI → PySide6](doc/pyside6-migration.md)
-- [Оркестрация](doc/orchestration.md)
-- [Промпты агентов](doc/agent-prompts/README.md)
-- [Подготовка среды](doc/dev-setup.md)
-- [Гид пользователя](doc/user-guide.md)
-- [Чеклист регрессии](doc/regression-checklist.md)
+## Download
 
-Правила для Cursor: [`AGENTS.md`](AGENTS.md), `.cursor/rules/`.
+Windows single-file build: [Releases](https://github.com/AtagyanAG/HostsKeeper/releases) (`HostsKeeper.exe`).  
+SmartScreen may warn — the binary is unsigned. Optional: install PuTTY / WinSCP for external launchers.
 
 ## Development
 
+Windows, Python ≥ 3.11:
+
 ```powershell
-cd <path-to-HostsKeeper>
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 python -m hostskeeper --version
@@ -38,13 +36,18 @@ pytest
 python -m hostskeeper
 ```
 
-UI: desktop PySide6 (`python -m hostskeeper`).  
-MCP HTTP (после unlock): `http://<host>:8765/mcp?key=<app-key>` — **Copy MCP config** в тулбаре.
+Build exe: `.\scripts\build_exe.ps1` → `dist\HostsKeeper.exe` (see [doc/dev-setup.md](doc/dev-setup.md)).
 
-Сборка одного exe: `.\scripts\build_exe.ps1` → `dist\HostsKeeper.exe` (см. `doc/dev-setup.md`).
+Optional live SSH tests: set `HOSTSKEEPER_TEST_SSH_KEY` (and host/user if needed). Never commit vaults, keys, or `.env`.
 
-Опциональные live-SSH тесты: задайте `HOSTSKEEPER_TEST_SSH_KEY` (и при необходимости host/user) — см. [dev-setup.md](doc/dev-setup.md). Не коммитьте vault, ключи и `.env`.
+## Docs
 
-## Статус
+- [User guide](doc/user-guide.md) · [Requirements](doc/requirements.md) · [Architecture](doc/architecture.md)
+- [MCP API](doc/mcp-api.md) · [Data model](doc/data-model.md) · [UI guidelines](doc/ui-guidelines.md)
+- Full index: [doc/README.md](doc/README.md)
 
-Ядро (этапы 0–8) и desktop PySide6 (этапы 9–14) в основной ветке. Регрессия: [doc/regression-checklist.md](doc/regression-checklist.md).
+## License
+
+[MIT](LICENSE). Third-party notices: [NOTICE](NOTICE).
+
+HostsKeeper is **not affiliated with** PuTTY, WinSCP, or other products named in the UI or docs. Those tools are optional externals you install yourself; they are not redistributed here.
