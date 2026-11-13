@@ -71,6 +71,7 @@ class HostScriptsPanel(QWidget):
         self._tree.customContextMenuRequested.connect(self._context_menu)
         self._tree.reparent_requested.connect(self._on_reparent)
         self._tree.itemDoubleClicked.connect(self._on_double_click)
+        self._tree.itemSelectionChanged.connect(self._sync_selection_actions)
         # Modal dialog: no cross-window DnD from main Scripts tree.
 
         btn_row = QHBoxLayout()
@@ -129,19 +130,23 @@ class HostScriptsPanel(QWidget):
             self._tree.clear()
 
     def _set_actions_enabled(self, enabled: bool) -> None:
-        for b in (
-            self._btn_add,
-            self._btn_group,
-            self._btn_edit,
-            self._btn_run,
-            self._btn_del,
-        ):
-            b.setEnabled(enabled)
+        self._btn_add.setEnabled(enabled)
+        self._btn_group.setEnabled(enabled)
         self._tree.setEnabled(enabled)
+        self._sync_selection_actions()
+
+    def _sync_selection_actions(self) -> None:
+        """Edit / Delete / Run only when a host script (not a group) is selected."""
+        payload = self._selected_payload() if self._enabled else None
+        on_script = bool(payload and payload.get("kind") == "script")
+        self._btn_edit.setEnabled(on_script)
+        self._btn_del.setEnabled(on_script)
+        self._btn_run.setEnabled(on_script and self._on_run is not None)
 
     def refresh(self) -> None:
         self._tree.clear()
         if self._host_id is None:
+            self._sync_selection_actions()
             return
         host_id = self._host_id
         groups = {
@@ -206,6 +211,7 @@ class HostScriptsPanel(QWidget):
                 group_items[script.group_id].addChild(item)
             else:
                 self._tree.addTopLevelItem(item)
+        self._sync_selection_actions()
 
     def _selected_payload(self) -> NodePayload | None:
         items = self._tree.selectedItems()
