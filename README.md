@@ -16,7 +16,19 @@ HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You**
 3. Turn **MCP** on for that tab; once: toolbar **Copy MCP config** → paste into Cursor `mcp.json`.
 4. The model uses `session_list` → `session_attach(alias=…)`, then read / subscribe. **Approve** (off by default) is required for write / script run.
 
-Secrets and IPs stay out of MCP payloads. Approve off = read-only for the model.
+Secrets and IPs stay out of MCP payloads. Human and AI share **one PTY per tab**:
+
+- **Approve off (default):** the model may still **read** / subscribe to the terminal scrollback; it cannot `session_write` or `scripts_run`.
+- **Approve on:** the model may write; every command it sends appears in the **same tab you see** — there is no hidden side channel.
+
+## MCP over HTTP (not just local stdio)
+
+HostsKeeper exposes MCP primarily as an **HTTP** endpoint with a stable **app key** (toolbar **Copy MCP config** → `http://<safe-host>:8765/mcp?key=…`). That is wider than a typical stdio MCP server glued to one local IDE process:
+
+- The AI client can run on the **same PC** (`127.0.0.1`) or on **another machine** that can reach the vault PC.
+- Credentials and SSH stay on the safe host; the client only sees enabled tabs (and scripts) under your MCP rules.
+
+**Trusted network only.** Intended for LAN or a **VPN / tunnel you operate yourself** (VPN setup is out of scope for this project). Do not expose the MCP port to the open internet without such a tunnel. **stdio** remains available as a same-machine alternative (no URL/key).
 
 ## Download
 
