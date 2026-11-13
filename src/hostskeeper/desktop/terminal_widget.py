@@ -264,6 +264,10 @@ class TerminalWidget(QWidget):
         """Plain-text visible screen (no CSI). Live buffer, not scrolled view."""
         return self._screen.screen_text()
 
+    def scrollback_text(self) -> str:
+        """Full scrollback history + primary screen (plain text, no CSI)."""
+        return self._screen.scrollback_text()
+
     def reset(self) -> None:
         self._view_offset = 0
         self._screen.reset()

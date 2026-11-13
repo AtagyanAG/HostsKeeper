@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import re
+from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -125,6 +129,12 @@ class SessionTab(QWidget):
             "Allow MCP session_write / scripts_run. Off = read-only for the model."
         )
         self._approve.toggled.connect(self._on_approve_toggled)
+        self._btn_save_log = QPushButton("Save log…")
+        self._btn_save_log.setToolTip(
+            "Save full terminal scrollback as UTF-8 text.\n"
+            "May include secrets that appeared on screen (env dumps, tokens, etc.)."
+        )
+        self._btn_save_log.clicked.connect(self._save_log)
         self._btn_reconnect = QPushButton("Reconnect")
         self._btn_disconnect = QPushButton("Disconnect")
         self._btn_close = QPushButton("Close")
@@ -136,6 +146,7 @@ class SessionTab(QWidget):
         chrome.addWidget(self._status)
         chrome.addWidget(self._mcp)
         chrome.addWidget(self._approve)
+        chrome.addWidget(self._btn_save_log)
         chrome.addStretch(1)
         chrome.addWidget(self._btn_reconnect)
         chrome.addWidget(self._btn_disconnect)
@@ -209,6 +220,31 @@ class SessionTab(QWidget):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "Approve", str(exc))
         self.refresh_chrome()
+
+    def _save_log(self) -> None:
+        try:
+            info = self._sessions.get(self.session_id)
+            alias = info.alias
+        except Exception:  # noqa: BLE001
+            alias = "session"
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe = re.sub(r"[^\w.\-]+", "_", alias, flags=re.UNICODE).strip("._") or "session"
+        suggested = f"{safe}-{stamp}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save terminal log",
+            suggested,
+            "Text files (*.txt);;All files (*.*)",
+        )
+        if not path:
+            return
+        text = self._term.scrollback_text()
+        try:
+            Path(path).write_text(text + ("\n" if text and not text.endswith("\n") else ""), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.critical(self, "HostsKeeper", f"Cannot save log:\n{exc}")
+            return
+        self.status_changed.emit()
 
     def _on_term_data(self, text: str) -> None:
         try:

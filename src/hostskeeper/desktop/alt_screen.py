@@ -40,6 +40,38 @@ class AltAwareScreen(HistoryScreen):
     def history_len(self) -> int:
         return len(self.history.top)
 
+    def scrollback_text(self) -> str:
+        """Full scrollback + primary screen as plain text (no CSI).
+
+        While alt-screen is active, appends the saved primary buffer when
+        available; otherwise appends the current display.
+        """
+        lines: list[str] = []
+        for virt in range(self.history_len()):
+            line = self.history.top[virt]
+            lines.append(self._line_plain(line))
+        if self.alt_screen and self._saved_buffer is not None:
+            for y in range(self.lines):
+                row = self._saved_buffer.get(y, {})
+                chars = [
+                    (row[x].data if x in row and row[x].data else " ")
+                    for x in range(self.columns)
+                ]
+                lines.append("".join(chars).rstrip())
+        else:
+            lines.extend(line.rstrip() for line in self.display)
+        # Drop trailing empty lines from the live screen padding.
+        while lines and not lines[-1]:
+            lines.pop()
+        return "\n".join(lines)
+
+    def _line_plain(self, line) -> str:
+        chars: list[str] = []
+        for x in range(self.columns):
+            ch = line[x]
+            chars.append(ch.data if ch.data else " ")
+        return "".join(chars).rstrip()
+
     def set_mode(self, *modes: int, **kwargs: Any) -> None:
         if kwargs.get("private") and _ALT_MODES.intersection(modes):
             self._enter_alt()

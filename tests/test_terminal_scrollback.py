@@ -77,6 +77,29 @@ def test_alt_screen_does_not_pollute_history() -> None:
     assert "before-alt" in screen.screen_text() or hist_before > 0
 
 
+def test_scrollback_text_includes_history_and_screen() -> None:
+    screen = AltAwareScreen(40, 4, history=20)
+    stream = pyte.Stream(screen)
+    for i in range(10):
+        stream.feed(f"hist-{i}\r\n")
+    text = screen.scrollback_text()
+    assert "hist-0" in text
+    assert "hist-9" in text
+    # Live rows after overflow into history still present.
+    assert text.count("\n") >= 3
+
+
+def test_widget_scrollback_text(qapp) -> None:
+    w = TerminalWidget()
+    w.resize(80 * w._cell_w + 20, 6 * w._cell_h)
+    w._apply_geometry_size(emit=False)
+    for i in range(20):
+        w.feed(f"row-{i}\r\n")
+    blob = w.scrollback_text()
+    assert "row-0" in blob
+    assert "row-19" in blob
+
+
 def test_widget_scroll_offset_and_alt_disables(qapp) -> None:
     w = TerminalWidget()
     w.resize(80 * w._cell_w + 20, 8 * w._cell_h)
