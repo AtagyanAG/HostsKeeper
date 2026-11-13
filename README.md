@@ -16,7 +16,7 @@ HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You**
 ## How it works
 
 1. Unlock a local encrypted vault (hosts, addresses, credentials, scripts).
-2. Open an SSH **Tab** yourself (or launch installed PuTTY / WinSCP).
+2. Open an SSH **Tab** yourself (or launch installed PuTTY / WinSCP). Optional **port knocking** (TCP/UDP sequence) can run on an Address before connect.
 3. Turn **MCP** on for that tab; once: toolbar **Copy MCP config** → paste into Cursor `mcp.json`.
 4. The model uses `session_list` → `session_attach(alias=…)`, then read / subscribe. **Approve** (off by default) is required for write / script run.
 
