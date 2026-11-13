@@ -91,6 +91,45 @@ def test_credential_auth_type_validation(tmp_path: Path) -> None:
     assert agent.private_key is None
 
 
+def test_credential_keeps_unused_secrets_when_auth_type_changes(tmp_path: Path) -> None:
+    from hostskeeper.vault.models import (
+        AUTH_KEY_PAIR,
+        AUTH_OPENSSH_CONFIG,
+        AUTH_PASSWORD,
+    )
+
+    vault = Vault.create(tmp_path / "keep.vault", "pw")
+    host = vault.add_host(Host(name="h"))
+    cred = vault.add_credential(
+        Credential(
+            host_id=host.id,
+            username="u",
+            auth_type=AUTH_PASSWORD,
+            password="keep-me",
+            private_key="-----BEGIN KEY-----\nold\n-----END KEY-----",
+            passphrase="pp",
+        )
+    )
+    cred.auth_type = AUTH_KEY_PAIR
+    updated = vault.update_credential(cred)
+    assert updated.auth_type == AUTH_KEY_PAIR
+    assert updated.password == "keep-me"
+    assert updated.private_key is not None
+    assert updated.passphrase == "pp"
+
+    updated.auth_type = AUTH_OPENSSH_CONFIG
+    agent = vault.update_credential(updated)
+    assert agent.auth_type == AUTH_OPENSSH_CONFIG
+    assert agent.password == "keep-me"
+    assert agent.private_key is not None
+    assert agent.passphrase == "pp"
+
+    agent.auth_type = AUTH_PASSWORD
+    back = vault.update_credential(agent)
+    assert back.auth_type == AUTH_PASSWORD
+    assert back.password == "keep-me"
+
+
 def test_wrong_password_rejected(tmp_path: Path) -> None:
     path = tmp_path / "demo.vault"
     Vault.create(path, "right-password")

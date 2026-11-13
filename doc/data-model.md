@@ -74,14 +74,15 @@ Session (runtime, не в vault):
 | label | string? | Короткое имя |
 | username | string | Логин |
 | auth_type | `password` \| `key_pair` \| `openssh_config` | Способ аутентификации |
-| password | secret? | Пароль (для `password`) |
-| private_key | secret? | PEM/OpenSSH key (для `key_pair`) |
-| passphrase | secret? | Пароль к ключу (для `key_pair`) |
+| password | secret? | Пароль (активен при `password`; может храниться и при других типах) |
+| private_key | secret? | PEM/OpenSSH key (активен при `key_pair`; может храниться и при других типах) |
+| passphrase | secret? | Пароль к ключу (для `key_pair`; может храниться и при других типах) |
 | description | string? | |
 | tags | string[] | |
 | created_at / updated_at | datetime | |
 
-Ограничение: `password` требует password; `key_pair` — private_key; `openssh_config` — агент/`~/.ssh/config` (секреты в vault не обязательны).
+Один Credential может одновременно держать последние `password` и `private_key`/`passphrase` для одного username: смена `auth_type` не затирает секреты неактивного способа. Для connect/launchers используется только активный тип.  
+Ограничение при сохранении: `password` требует непустой password; `key_pair` — private_key; `openssh_config` — агент/`~/.ssh/config` (ранее сохранённые секреты остаются в vault).
 
 **Важно:** поля secret никогда не сериализуются в MCP и в логи.
 

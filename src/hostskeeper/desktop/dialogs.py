@@ -806,7 +806,8 @@ class CredentialDialog(QDialog):
         self._private_key_wrap = QWidget()
         self._private_key_wrap.setLayout(key_col)
         self._openssh_hint = QLabel(
-            "Uses SSH agent and ~/.ssh/config (no password/key stored in vault)."
+            "Uses SSH agent and ~/.ssh/config for connect. "
+            "Previously saved password/key stay in the vault for other types."
         )
         self._openssh_hint.setWordWrap(True)
         self._description = QLineEdit(credential.description or "" if credential else "")
@@ -927,18 +928,18 @@ class CredentialDialog(QDialog):
             QMessageBox.warning(self, "HostsKeeper", "Username is required.")
             return
         auth_type = self._auth_type.currentData()
-        if auth_type == AUTH_PASSWORD:
-            password = self._password.text() or None
-            private_key = None
-            passphrase = None
-        elif auth_type == AUTH_KEY_PAIR:
-            password = None
-            private_key = self._private_key.toPlainText().strip() or None
-            passphrase = self._passphrase.text() or None
-        else:
-            password = None
-            private_key = None
-            passphrase = None
+        # Keep values for every auth type on the same Credential so switching
+        # Type does not wipe the other method's secrets (fields stay filled
+        # while hidden; inactive types are still written through).
+        password = self._password.text() or None
+        private_key = self._private_key.toPlainText().strip() or None
+        passphrase = self._passphrase.text() or None
+        if auth_type == AUTH_PASSWORD and not password:
+            QMessageBox.warning(self, "HostsKeeper", "Password is required.")
+            return
+        if auth_type == AUTH_KEY_PAIR and not private_key:
+            QMessageBox.warning(self, "HostsKeeper", "Private key is required.")
+            return
         try:
             if self._credential is None:
                 self._result = self._vault.add_credential(

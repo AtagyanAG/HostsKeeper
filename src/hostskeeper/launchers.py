@@ -15,7 +15,12 @@ from pathlib import Path
 from urllib.parse import quote
 
 from hostskeeper.session.knock import KnockStep, perform_knock
-from hostskeeper.vault.models import Address, Credential
+from hostskeeper.vault.models import (
+    AUTH_KEY_PAIR,
+    AUTH_PASSWORD,
+    Address,
+    Credential,
+)
 
 
 def _maybe_knock(address: Address) -> None:
@@ -159,12 +164,13 @@ def build_putty_args(
     if paths.putty is None:
         raise FileNotFoundError("putty.exe not found")
     # Never put password on CLI (visible in process list).
+    # Respect auth_type: unused secrets may remain stored on the Credential.
     target = f"{credential.username}@{address.host}"
     args = [str(paths.putty), "-ssh", target, "-P", str(address.port)]
-    if credential.private_key:
+    if credential.auth_type == AUTH_KEY_PAIR and credential.private_key:
         key_path = _materialize_ppk(paths, credential.private_key, credential.passphrase)
         args.extend(["-i", str(key_path)])
-    elif credential.password:
+    elif credential.auth_type == AUTH_PASSWORD and credential.password:
         pipe_path = serve_named_pipe_bytes(
             (credential.password + "\n").encode("utf-8")
         )
@@ -204,7 +210,7 @@ def build_winscp_args(
     args = [str(paths.winscp), url, "/hostkey=acceptnew"]
 
     need_secret_files = False
-    if credential.private_key:
+    if credential.auth_type == AUTH_KEY_PAIR and credential.private_key:
         key_path = _materialize_ppk(
             paths, credential.private_key, credential.passphrase
         )
@@ -214,7 +220,7 @@ def build_winscp_args(
             pipe = serve_named_pipe_bytes(credential.passphrase.encode("utf-8"))
             args.append(f"/passphrase={pipe}")
             need_secret_files = True
-    elif credential.password:
+    elif credential.auth_type == AUTH_PASSWORD and credential.password:
         pipe = serve_named_pipe_bytes(credential.password.encode("utf-8"))
         args.append(f"/password={pipe}")
         need_secret_files = True

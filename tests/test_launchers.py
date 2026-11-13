@@ -10,7 +10,7 @@ from hostskeeper.launchers import (
     read_named_pipe_bytes,
     serve_named_pipe_bytes,
 )
-from hostskeeper.vault.models import Address, Credential
+from hostskeeper.vault.models import AUTH_PASSWORD, Address, Credential
 from tests.lab_env import KEY_PATH, lab_key_available
 
 _LAB_USER = "labuser"
@@ -102,6 +102,27 @@ def test_putty_remote_command_keeps_shell_open() -> None:
     cmd_file = Path(args[args.index("-m") + 1])
     text = cmd_file.read_text(encoding="utf-8")
     assert 'exec "$SHELL" -l' in text
+
+
+def test_putty_password_auth_ignores_stored_private_key() -> None:
+    paths = discover_launchers()
+    if paths.putty is None:
+        return
+    password = f"s3cret-{uuid4().hex}"
+    host_id = uuid4()
+    address = Address(host_id=host_id, host="192.0.2.10", port=22, label="lab")
+    credential = Credential(
+        host_id=host_id,
+        username=_LAB_USER,
+        auth_type=AUTH_PASSWORD,
+        password=password,
+        private_key="-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----",
+    )
+    args = build_putty_args(paths, address, credential)
+    assert "-pwfile" in args
+    assert "-i" not in args
+    pipe = args[args.index("-pwfile") + 1]
+    assert read_named_pipe_bytes(pipe).decode("utf-8") == password + "\n"
 
 
 def test_winscp_key_without_passphrase_uses_gui_url() -> None:
