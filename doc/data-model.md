@@ -109,9 +109,13 @@ Session (runtime, не в vault):
 | name | string | Имя для `{{name}}` |
 | description | string? | Подсказка для ИИ/человека |
 | required | bool | Обязательность |
-| default | string? | Значение по умолчанию |
+| default | string? | Значение по умолчанию (MCP / обычный Run) |
+| user_value | secret? | Человеческое значение для локального Run (PuTTY); при создании параметра копируется из `default`, дальше только руками; в MCP не отдаётся |
 
-Подстановка: все вхождения `{{name}}` в `body` заменяются значениями при `scripts_run`. Неразрешённые плейсхолдеры — ошибка (не молчаливая вставка пустоты).
+Подстановка: все вхождения `{{name}}` в `body` заменяются значениями.  
+- MCP `scripts_run` / обычный Run: `params` → иначе `default` → иначе ошибка для required.  
+- Run dialog с **Use user values**: только `user_value` (пустая строка допустима; `null`/отсутствие при использовании в body — ошибка до launch/Copy); цель только PuTTY (+ Copy в буфер).  
+Неразрешённые плейсхолдеры — ошибка (не молчаливая вставка пустоты).
 
 ## Session (runtime)
 
@@ -145,6 +149,7 @@ Session (runtime, не в vault):
 | session id / alias / status | host, address, port, username |
 | вывод PTY (новые строки) | password, key, passphrase |
 | метаданные скриптов и body | пути на диске сейфа, содержимое vault blob |
+| parameters без `user_value` | `user_value` параметров скрипта |
 | ошибки `disconnected` / `approve_required` | любые raw credential |
 | `screen_tail` / `alt_screen` (из UI) | — |
 

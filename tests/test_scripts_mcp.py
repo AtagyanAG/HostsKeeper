@@ -44,6 +44,107 @@ def test_render_defaults() -> None:
     assert render_script(script, {}) == "echo lo"
 
 
+def test_render_user_values() -> None:
+    script = Script(
+        name="x",
+        body="echo {{iface}}",
+        parameters=[
+            ScriptParameter(
+                name="iface",
+                required=False,
+                default="lo",
+                user_value="eth0",
+            )
+        ],
+    )
+    assert render_script(script, {}) == "echo lo"
+    assert render_script(script, {}, use_user_values=True) == "echo eth0"
+    assert render_script(script, {"iface": "wlan0"}, use_user_values=True) == "echo eth0"
+
+    empty = Script(
+        name="y",
+        body="echo {{iface}}",
+        parameters=[
+            ScriptParameter(name="iface", required=True, user_value=""),
+        ],
+    )
+    assert render_script(empty, {}, use_user_values=True) == "echo "
+
+    missing = Script(
+        name="z",
+        body="echo {{iface}}",
+        parameters=[ScriptParameter(name="iface", required=True, default="lo")],
+    )
+    with pytest.raises(McpToolError) as exc:
+        render_script(missing, {}, use_user_values=True)
+    assert exc.value.code == "missing_param"
+
+
+def test_mcp_redacts_and_preserves_user_value(tmp_path: Path) -> None:
+    vault = Vault.create(tmp_path / "uv.vault", "test-pass")
+    script = vault.add_script(
+        Script(
+            name="say",
+            body="echo {{tag}}",
+            parameters=[
+                ScriptParameter(
+                    name="tag",
+                    required=True,
+                    default="public",
+                    user_value="secret-uv",
+                )
+            ],
+        )
+    )
+    service = McpToolService(SessionManager(vault), vault)
+    access = McpAccess(mode="stdio")
+
+    listed = service.scripts_list(access)
+    row = next(s for s in listed["scripts"] if s["name"] == "say")
+    assert row["parameters"][0]["name"] == "tag"
+    assert "user_value" not in row["parameters"][0]
+
+    got = service.scripts_get(access, id=str(script.id))
+    assert "user_value" not in got["parameters"][0]
+    assert "secret-uv" not in str(got)
+
+    # MCP cannot inject user_value; existing value for same name is kept.
+    updated = service.scripts_update(
+        access,
+        id=str(script.id),
+        parameters=[
+            {
+                "name": "tag",
+                "required": True,
+                "default": "public2",
+                "user_value": "hacked",
+            }
+        ],
+    )
+    assert "user_value" not in updated["parameters"][0]
+    stored = vault.get_script(script.id)
+    assert stored.parameters[0].default == "public2"
+    assert stored.parameters[0].user_value == "secret-uv"
+
+    created = service.scripts_create(
+        access,
+        name="other",
+        body="echo {{x}}",
+        parameters=[
+            {
+                "name": "x",
+                "required": True,
+                "default": "from-default",
+                "user_value": "nope",
+            }
+        ],
+    )
+    assert "user_value" not in created["parameters"][0]
+    other = vault.get_script_by_name("other")
+    # Inbound user_value ignored; seeded from default on create.
+    assert other.parameters[0].user_value == "from-default"
+
+
 @pytest.mark.skipif(
     not lab_key_available(),
     reason="set HOSTSKEEPER_TEST_SSH_KEY to a readable private key for live SSH tests",

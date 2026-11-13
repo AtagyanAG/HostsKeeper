@@ -33,6 +33,7 @@ from hostskeeper.desktop.dialogs import (
     CredentialDialog,
     HostDialog,
     RevealSecretDialog,
+    RunScriptTargetDialog,
     ScriptDialog,
 )
 from hostskeeper.desktop.drop_tree import DropTreeWidget
@@ -1030,6 +1031,7 @@ class MainWindow(QMainWindow):
                 lambda g=node.get("group_id"): self._new_workspace_group("scripts", g),
             )
             menu.addSeparator()
+            menu.addAction("Run…", lambda: self._run_template_script(node["id"]))
             menu.addAction("Copy", lambda: self._copy_script(node["id"]))
             menu.addAction("Edit", lambda: self._edit_script(node["id"]))
             menu.addAction("Delete", lambda: self._delete_script(node["id"]))
@@ -1324,6 +1326,68 @@ class MainWindow(QMainWindow):
         except NotFoundError:
             return
         copy_script_to_clipboard(script)
+
+    def _run_template_script(self, script_id: UUID) -> None:
+        """Run a global Scripts-tree template against a chosen host."""
+        from hostskeeper.mcp.errors import McpToolError
+        from hostskeeper.mcp.scripts_render import render_script
+
+        if not self._state.unlocked or self._state.sessions is None:
+            return
+        try:
+            script = self._vault().get_script(script_id)
+        except NotFoundError:
+            return
+        if script.host_id is not None:
+            QMessageBox.information(
+                self,
+                "HostsKeeper",
+                "Host scripts are run from Edit Host → Scripts.",
+            )
+            return
+        host = self._pick_host_for_script_run()
+        if host is None:
+            return
+        addr_id = host.default_address_id
+        cred_id = host.default_credential_id
+        if addr_id is None or cred_id is None:
+            QMessageBox.information(
+                self,
+                "HostsKeeper",
+                "Set Address and Credential on the host before running a script.",
+            )
+            return
+        sessions = [
+            (s.id, s.alias)
+            for s in self._state.sessions.list_sessions()
+            if s.host_id == host.id
+        ]
+        dlg = RunScriptTargetDialog(sessions, script=script, parent=self)
+        if dlg.exec() != RunScriptTargetDialog.DialogCode.Accepted or dlg.mode is None:
+            return
+        try:
+            rendered = render_script(
+                script, {}, use_user_values=dlg.use_user_values
+            )
+        except McpToolError as exc:
+            QMessageBox.warning(self, "Run script", str(exc))
+            return
+        self._run_script_target(host.id, addr_id, cred_id, rendered, dlg.mode)
+
+    def _pick_host_for_script_run(self):
+        """Ask which host to run a template script on. Returns Host or None."""
+        from hostskeeper.desktop.dialogs import PickHostDialog
+
+        hosts = sorted(self._vault().list_hosts(), key=lambda h: h.name.lower())
+        if not hosts:
+            QMessageBox.information(self, "HostsKeeper", "No hosts in vault.")
+            return None
+        if len(hosts) == 1:
+            return hosts[0]
+        dlg = PickHostDialog(hosts, parent=self)
+        if dlg.exec() != PickHostDialog.DialogCode.Accepted:
+            return None
+        return dlg.selected_host
 
     def _on_tree_selection(self) -> None:
         if not self._state.unlocked:

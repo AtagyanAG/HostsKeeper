@@ -325,7 +325,7 @@ class McpToolService:
                     "name": script.name,
                     "description": script.description,
                     "tags": list(script.tags),
-                    "parameters": [p.to_dict() for p in script.parameters],
+                    "parameters": [p.to_mcp_dict() for p in script.parameters],
                     "host_id": str(script.host_id) if script.host_id else None,
                     "group_id": str(script.group_id) if script.group_id else None,
                 }
@@ -342,7 +342,7 @@ class McpToolService:
     ) -> dict[str, Any]:
         self._assert_access(access)
         script = self._find_script(access, id=id, name=name, host_id=host_id)
-        return script.to_dict()
+        return script.to_mcp_dict()
 
     def scripts_create(
         self,
@@ -379,7 +379,9 @@ class McpToolService:
             body=body,
             description=description,
             tags=list(tags or []),
-            parameters=[ScriptParameter.from_dict(p) for p in (parameters or [])],
+            parameters=[
+                ScriptParameter.from_mcp_dict(p) for p in (parameters or [])
+            ],
             host_id=resolved_host,
             group_id=resolved_group,
         )
@@ -388,7 +390,7 @@ class McpToolService:
         except ValidationError as exc:
             raise McpToolError("invalid_args", str(exc)) from exc
         self._notify_vault_changed()
-        return stored.to_dict()
+        return stored.to_mcp_dict()
 
     def scripts_update(
         self,
@@ -415,7 +417,12 @@ class McpToolService:
         if tags is not None:
             script.tags = list(tags)
         if parameters is not None:
-            script.parameters = [ScriptParameter.from_dict(p) for p in parameters]
+            previous = {p.name: p for p in script.parameters}
+            script.parameters = [
+                ScriptParameter.from_mcp_dict(p, preserve=previous.get(p.get("name")))
+                for p in parameters
+                if isinstance(p, dict)
+            ]
         if group_id is not None:
             script.group_id = UUID(group_id) if group_id else None
         try:
@@ -423,7 +430,7 @@ class McpToolService:
         except (ValidationError, ValueError) as exc:
             raise McpToolError("invalid_args", str(exc)) from exc
         self._notify_vault_changed()
-        return stored.to_dict()
+        return stored.to_mcp_dict()
 
     def scripts_delete(
         self,

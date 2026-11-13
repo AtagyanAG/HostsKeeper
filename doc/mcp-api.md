@@ -199,19 +199,20 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 
 Шаблоны (`host_id=null`) — всегда. Скрипты хоста — только если у клиента есть открытая MCP-вкладка этого хоста.
 
-Выход: `id`, `name`, `description`, `tags`, `parameters`, `host_id`, `group_id`.
+Выход: `id`, `name`, `description`, `tags`, `parameters` (без `user_value`), `host_id`, `group_id`.
 
 ### scripts_get
 
 Вход: `{ "id"?, "name"?, "host_id"? }` — `host_id` для однозначности имени host-скрипта.
 
-Выход: полная карточка включая `body`.
+Выход: полная карточка включая `body`; в `parameters` нет `user_value`.
 
 ### scripts_create / scripts_update
 
 Вход: поля Script + опционально `host_id`, `group_id`.  
 `host_id` при create — только при открытой MCP-вкладке этого хоста.  
-Update — по `id` или `name` (+ `host_id` при неоднозначности).
+Update — по `id` или `name` (+ `host_id` при неоднозначности).  
+Входящий `user_value` в parameters **игнорируется**; при update существующие `user_value` по совпавшему `name` сохраняются.
 
 Без approve.
 
@@ -223,7 +224,7 @@ Update — по `id` или `name` (+ `host_id` при неоднозначно�
 
 ### scripts_run
 
-Подстановка параметров → вставка в PTY.  
+Подстановка параметров (`params` / `default`) → вставка в PTY. Поле `user_value` **не используется** (только UI Run с «Use user values» → PuTTY).  
 Шаблон — в любую доступную сессию. Host-скрипт — **только** в сессию того же хоста.
 
 Вход:

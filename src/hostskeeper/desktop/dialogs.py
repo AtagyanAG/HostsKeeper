@@ -8,8 +8,9 @@ from pathlib import Path
 from uuid import UUID
 
 from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QShowEvent
+from PySide6.QtGui import QGuiApplication, QShowEvent
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QTabWidget,
     QTextBrowser,
@@ -478,16 +480,18 @@ class HostDialog(QDialog):
         from hostskeeper.mcp.errors import McpToolError
         from hostskeeper.mcp.scripts_render import render_script
 
-        try:
-            rendered = render_script(script, {})
-        except McpToolError as exc:
-            QMessageBox.warning(self, "HostsKeeper", str(exc))
-            return
         sessions: list[tuple[UUID, str]] = []
         if self._list_host_sessions is not None:
             sessions = self._list_host_sessions(self._host.id)
-        dlg = RunScriptTargetDialog(sessions, parent=self)
+        dlg = RunScriptTargetDialog(sessions, script=script, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted or dlg.mode is None:
+            return
+        try:
+            rendered = render_script(
+                script, {}, use_user_values=dlg.use_user_values
+            )
+        except McpToolError as exc:
+            QMessageBox.warning(self, "HostsKeeper", str(exc))
             return
         saved = self._persist_host_fields()
         if saved is None:
@@ -508,6 +512,46 @@ class HostDialog(QDialog):
         return self._result
 
 
+class PickHostDialog(QDialog):
+    """Choose a host to run a template script against."""
+
+    def __init__(self, hosts: list[Host], parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Run script — choose host")
+        self.selected_host: Host | None = None
+        self._list = QListWidget()
+        for host in hosts:
+            item = QListWidgetItem(host.name)
+            item.setData(Qt.ItemDataRole.UserRole, host)
+            self._list.addItem(item)
+        if hosts:
+            self._list.setCurrentRow(0)
+        self._list.itemDoubleClicked.connect(self._accept)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Host:"))
+        layout.addWidget(self._list)
+        layout.addWidget(buttons)
+        self.resize(360, 320)
+
+    def _accept(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            QMessageBox.warning(self, "HostsKeeper", "Select a host.")
+            return
+        host = item.data(Qt.ItemDataRole.UserRole)
+        if host is None:
+            return
+        self.selected_host = host
+        self.accept()
+
+
 class RunScriptTargetDialog(QDialog):
     """Choose where to run a host script: open tab / new Tab / PuTTY."""
 
@@ -515,14 +559,47 @@ class RunScriptTargetDialog(QDialog):
         self,
         sessions: list[tuple[UUID, str]],
         parent=None,
+        *,
+        script: Script | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Run script")
         self.mode: str | None = None
+        self.use_user_values = False
+        self._script = script
         self._sessions = sessions
+
+        self._has_params = bool(script.parameters) if script is not None else False
+
+        self._use_user = QCheckBox("Use user values")
+        self._use_user.setToolTip(
+            "Substitute {{param}} from parameter user_value. "
+            "When the script has parameters, launch only via PuTTY "
+            "(not visible to MCP tabs)."
+        )
+        self._use_user.toggled.connect(self._apply_user_mode)
+        # No parameters → nothing to substitute; keep Tab / Open tab available.
+        self._use_user.setEnabled(self._has_params)
+        if not self._has_params:
+            self._use_user.setToolTip(
+                "This script has no parameters; user values do not apply."
+            )
+
+        self._hint = QLabel(
+            "Script contains user parameters. Launch only in PuTTY."
+        )
+        self._hint.setWordWrap(True)
+        self._hint.setVisible(False)
+
         self._radio_new = QRadioButton("New Tab")
         self._radio_putty = QRadioButton("PuTTY")
         self._radio_existing = QRadioButton("Open tab")
+        # Different parents (targets wrap vs dialog) — need an explicit group.
+        self._target_group = QButtonGroup(self)
+        self._target_group.setExclusive(True)
+        self._target_group.addButton(self._radio_existing)
+        self._target_group.addButton(self._radio_new)
+        self._target_group.addButton(self._radio_putty)
         self._list = QListWidget()
         for sid, alias in sessions:
             item = QListWidgetItem(alias)
@@ -536,19 +613,81 @@ class RunScriptTargetDialog(QDialog):
             self._list.setEnabled(False)
             self._radio_new.setChecked(True)
 
+        self._targets = QWidget()
+        targets_layout = QVBoxLayout(self._targets)
+        targets_layout.setContentsMargins(0, 0, 0, 0)
+        targets_layout.addWidget(self._radio_existing)
+        targets_layout.addWidget(self._list)
+        targets_layout.addWidget(self._radio_new)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(self._radio_existing)
-        layout.addWidget(self._list)
-        layout.addWidget(self._radio_new)
+        layout.addWidget(self._use_user)
+        layout.addWidget(self._hint)
+        layout.addWidget(self._targets)
         layout.addWidget(self._radio_putty)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self._copy_btn = QPushButton("Copy")
+        self._copy_btn.setToolTip(
+            "Copy script to clipboard with user_value substitutions."
+        )
+        self._copy_btn.setVisible(False)
+        self._copy_btn.clicked.connect(self._copy_rendered)
+        row = QHBoxLayout()
+        row.addWidget(self._copy_btn)
+        row.addStretch(1)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+
+    def _putty_only_user_mode(self) -> bool:
+        return self._use_user.isChecked() and self._has_params
+
+    def _apply_user_mode(self, enabled: bool) -> None:
+        putty_only = enabled and self._has_params
+        self.use_user_values = putty_only
+        self._hint.setVisible(putty_only)
+        self._targets.setVisible(not putty_only)
+        self._copy_btn.setVisible(putty_only)
+        if putty_only:
+            self._radio_putty.setChecked(True)
+        elif self._sessions:
+            self._radio_existing.setChecked(True)
+        else:
+            self._radio_new.setChecked(True)
+
+    def _copy_rendered(self) -> None:
+        if self._script is None:
+            return
+        from hostskeeper.mcp.errors import McpToolError
+        from hostskeeper.mcp.scripts_render import render_script
+
+        try:
+            text = render_script(self._script, {}, use_user_values=True)
+        except McpToolError as exc:
+            QMessageBox.warning(self, "HostsKeeper", str(exc))
+            return
+        QGuiApplication.clipboard().setText(text)
 
     def _accept(self) -> None:
+        if self._putty_only_user_mode():
+            if self._script is not None:
+                from hostskeeper.mcp.errors import McpToolError
+                from hostskeeper.mcp.scripts_render import render_script
+
+                try:
+                    render_script(self._script, {}, use_user_values=True)
+                except McpToolError as exc:
+                    QMessageBox.warning(self, "HostsKeeper", str(exc))
+                    return
+            self.use_user_values = True
+            self.mode = "putty"
+            self.accept()
+            return
+        self.use_user_values = False
         if self._radio_new.isChecked():
             self.mode = "new_tab"
         elif self._radio_putty.isChecked():
@@ -1041,16 +1180,33 @@ class ScriptDialog(QDialog):
             )
         )
         self._params.setPlaceholderText(
-            '[{"name":"tag","required":true,"default":null,"description":null}]'
+            '[{"name":"tag","required":true,"default":"",'
+            '"description":null,"user_value":""}]'
         )
-        self._params.setFixedHeight(100)
 
         form = QFormLayout()
         form.addRow("Name", self._name)
         form.addRow("Description", self._description)
         form.addRow("Tags", self._tags)
-        form.addRow("Body", self._body)
-        form.addRow("Parameters JSON", self._params)
+
+        body_wrap = QWidget()
+        body_col = QVBoxLayout(body_wrap)
+        body_col.setContentsMargins(0, 0, 0, 0)
+        body_col.addWidget(QLabel("Body"))
+        body_col.addWidget(self._body)
+
+        params_wrap = QWidget()
+        params_col = QVBoxLayout(params_wrap)
+        params_col.setContentsMargins(0, 0, 0, 0)
+        params_col.addWidget(QLabel("Parameters JSON"))
+        params_col.addWidget(self._params)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(body_wrap)
+        splitter.addWidget(params_wrap)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        splitter.setChildrenCollapsible(False)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -1059,7 +1215,9 @@ class ScriptDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addWidget(splitter, stretch=1)
         layout.addWidget(buttons)
+        self.resize(520, 560)
 
     def _save(self) -> None:
         name = self._name.text().strip()
@@ -1069,7 +1227,23 @@ class ScriptDialog(QDialog):
             return
         try:
             raw = self._params.toPlainText().strip() or "[]"
-            params = [ScriptParameter.from_dict(p) for p in json.loads(raw)]
+            raw_list = json.loads(raw)
+            if not isinstance(raw_list, list):
+                raise TypeError("parameters must be a JSON array")
+            previous = {
+                p.name: p for p in (self._script.parameters if self._script else [])
+            }
+            params: list[ScriptParameter] = []
+            for item in raw_list:
+                if not isinstance(item, dict):
+                    raise TypeError("each parameter must be an object")
+                payload = dict(item)
+                # Omitting user_value on edit keeps the previous secret; on create
+                # from_dict seeds it from default.
+                pname = payload.get("name")
+                if "user_value" not in payload and pname in previous:
+                    payload["user_value"] = previous[pname].user_value
+                params.append(ScriptParameter.from_dict(payload))
         except (json.JSONDecodeError, TypeError, KeyError) as exc:
             QMessageBox.warning(self, "HostsKeeper", f"Invalid parameters JSON:\n{exc}")
             return

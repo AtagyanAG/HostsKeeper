@@ -285,8 +285,27 @@ class ScriptParameter:
     description: str | None = None
     required: bool = True
     default: str | None = None
+    # Human-only secret for local Run (PuTTY). Never exposed via MCP.
+    user_value: str | None = None
+
+    def __repr__(self) -> str:
+        return (
+            f"ScriptParameter(name={self.name!r}, description={self.description!r}, "
+            f"required={self.required!r}, default={self.default!r}, "
+            f"user_value={'***' if self.user_value is not None else None})"
+        )
 
     def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "required": self.required,
+            "default": self.default,
+            "user_value": self.user_value,
+        }
+
+    def to_mcp_dict(self) -> dict[str, Any]:
+        """Public parameter card for MCP (no user_value)."""
         return {
             "name": self.name,
             "description": self.description,
@@ -296,12 +315,33 @@ class ScriptParameter:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ScriptParameter:
+        default = data.get("default")
+        # On create (key omitted): seed user_value from default. Explicit null stays null.
+        if "user_value" in data:
+            user_value = data.get("user_value")
+        else:
+            user_value = default
         return cls(
             name=data["name"],
             description=data.get("description"),
             required=bool(data.get("required", True)),
-            default=data.get("default"),
+            default=default,
+            user_value=user_value,
         )
+
+    @classmethod
+    def from_mcp_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        preserve: ScriptParameter | None = None,
+    ) -> ScriptParameter:
+        """Build from MCP payload: ignore inbound user_value; keep existing if any."""
+        cleaned = {k: v for k, v in data.items() if k != "user_value"}
+        param = cls.from_dict(cleaned)
+        if preserve is not None:
+            param.user_value = preserve.user_value
+        return param
 
 
 @dataclass
@@ -331,6 +371,11 @@ class Script:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
+
+    def to_mcp_dict(self) -> dict[str, Any]:
+        data = self.to_dict()
+        data["parameters"] = [p.to_mcp_dict() for p in self.parameters]
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Script:

@@ -137,6 +137,57 @@ def test_wrong_password_rejected(tmp_path: Path) -> None:
         Vault(path).unlock("wrong-password")
 
 
+def test_script_parameter_user_value_seeds_from_default() -> None:
+    seeded = ScriptParameter.from_dict(
+        {"name": "t", "required": True, "default": "seed-me"}
+    )
+    assert seeded.user_value == "seed-me"
+    explicit = ScriptParameter.from_dict(
+        {
+            "name": "t",
+            "required": True,
+            "default": "seed-me",
+            "user_value": "mine",
+        }
+    )
+    assert explicit.user_value == "mine"
+    cleared = ScriptParameter.from_dict(
+        {
+            "name": "t",
+            "required": True,
+            "default": "seed-me",
+            "user_value": None,
+        }
+    )
+    assert cleared.user_value is None
+
+
+def test_script_parameter_user_value_roundtrip(tmp_path: Path) -> None:
+    vault = Vault.create(tmp_path / "uv.vault", "pw")
+    script = vault.add_script(
+        Script(
+            name="s",
+            body="echo {{t}}",
+            parameters=[
+                ScriptParameter(
+                    name="t",
+                    required=True,
+                    default="d",
+                    user_value="secret-user",
+                )
+            ],
+        )
+    )
+    vault.lock()
+    again = Vault(tmp_path / "uv.vault")
+    again.unlock("pw")
+    loaded = again.get_script(script.id)
+    assert loaded.parameters[0].default == "d"
+    assert loaded.parameters[0].user_value == "secret-user"
+    assert "secret-user" not in repr(loaded.parameters[0])
+    assert "user_value=***" in repr(loaded.parameters[0])
+
+
 def test_credential_repr_redacts_secrets() -> None:
     cred = Credential(
         host_id=Host(name="x").id,

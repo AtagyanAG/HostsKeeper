@@ -136,11 +136,12 @@ class HostScriptsPanel(QWidget):
         self._sync_selection_actions()
 
     def _sync_selection_actions(self) -> None:
-        """Edit / Delete / Run only when a host script (not a group) is selected."""
+        """Edit/Run for scripts; Delete for script or group."""
         payload = self._selected_payload() if self._enabled else None
         on_script = bool(payload and payload.get("kind") == "script")
+        on_group = bool(payload and payload.get("kind") == "group")
         self._btn_edit.setEnabled(on_script)
-        self._btn_del.setEnabled(on_script)
+        self._btn_del.setEnabled(on_script or on_group)
         self._btn_run.setEnabled(on_script and self._on_run is not None)
 
     def refresh(self) -> None:
