@@ -41,6 +41,7 @@ from hostskeeper.desktop.ipv4_input import (
     looks_like_ipv4,
     normalize_ipv4_commas,
 )
+from hostskeeper.desktop.syntax_edit import install_json_editor, install_shell_editor
 from hostskeeper.session.knock import (
     KnockStep,
     format_knock_sequence,
@@ -1183,6 +1184,9 @@ class ScriptDialog(QDialog):
             '[{"name":"tag","required":true,"default":"",'
             '"description":null,"user_value":""}]'
         )
+        # Keep refs so highlighters/matchers are not garbage-collected.
+        self._body_syntax = install_shell_editor(self._body)
+        self._params_syntax = install_json_editor(self._params)
 
         form = QFormLayout()
         form.addRow("Name", self._name)
