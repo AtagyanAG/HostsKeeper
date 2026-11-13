@@ -1,0 +1,13 @@
+---
+description: Python package conventions for HostsKeeper core
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python (HostsKeeper)
+
+- Package layout under `src/hostskeeper/` (or `hostskeeper/` if already chosen in stage 0) with modules: `vault`, `session`, `mcp`, `api`.
+- Secret fields: never in `__repr__` / `__str__`; use redaction helpers.
+- Prefer explicit types and small pure functions at vault/MCP boundaries.
+- Tests must cover: wrong vault password fails; MCP serializers omit address/credential secrets.
+- Do not commit `.vault`, private keys, or live credentials.

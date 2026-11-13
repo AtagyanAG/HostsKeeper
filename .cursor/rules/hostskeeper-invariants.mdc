@@ -1,0 +1,16 @@
+---
+description: HostsKeeper v1 invariants — secrets, MCP, scope
+alwaysApply: true
+---
+
+# HostsKeeper invariants
+
+- Before coding: read `doc/requirements.md`, `architecture.md`, `data-model.md`, `mcp-api.md`; for UI also `ui-guidelines.md`; for stages 9–14 also `pyside6-migration.md`.
+- One implementation stage at a time (`doc/agent-prompts/stage-N.md`). Do not start N+1.
+- Never expose secrets, host addresses, usernames, keys, or passwords via MCP tools, logs, `repr`, or error payloads.
+- Humans open SSH sessions; AI only attaches to MCP-enabled UI tabs.
+- PuTTY/WinSCP launches are human-only — not in MCP session list.
+- HTTP MCP: preferred stable app key (`?key=`) sees all MCP-enabled tabs (session_list / session_attach); legacy `?token=` is one tab, one client; stdio is trusted local (no token) and sees all MCP-enabled sessions + scripts.
+- Approve checkbox (default off): off = MCP read-only; on = `session_write` / `scripts_run` allowed without modal; script CRUD needs no Approve.
+- Out of v1: cloud sync, Termius-like Multiplayer, agents on target hosts, vault backup, Termius import.
+- Windows + Python core; UI is connection-manager class (tree + toolbar + tabs), not chat-centric; target stack PySide6 (web UI is temporary until stages 9–14).

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hostskeeper"
+version = "0.1.0"
+description = "Local Windows vault for host credentials, scripts, and MCP session attach"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "HostsKeeper contributors" }]
+dependencies = [
+  "cryptography>=42",
+  "paramiko>=3.4",
+  "mcp>=2.3",
+  "uvicorn>=0.30",
+  "starlette>=0.40",
+  "fastapi>=0.115",
+]
+
+[project.optional-dependencies]
+desktop = [
+  "PySide6>=6.6",
+  "pyte>=0.8.2",
+  "markdown>=3.5",
+]
+dev = [
+  "pytest>=8",
+  "PySide6>=6.6",
+  "pyte>=0.8.2",
+  "markdown>=3.5",
+]
+packaging = [
+  "PySide6>=6.6",
+  "pyte>=0.8.2",
+  "markdown>=3.5",
+  "pyinstaller>=6.3",
+]
+
+[project.scripts]
+hostskeeper = "hostskeeper.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

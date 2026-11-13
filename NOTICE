@@ -1,0 +1,26 @@
+HostsKeeper
+Copyright (c) 2026 HostsKeeper contributors
+
+This product includes software developed by third parties. At runtime / when
+building from source, HostsKeeper depends on (non-exhaustive):
+
+  cryptography          Apache-2.0 OR BSD-3-Clause
+  paramiko              LGPL-2.1
+  mcp                   MIT
+  uvicorn               BSD-3-Clause
+  starlette             BSD-3-Clause
+  fastapi               MIT
+  PySide6               LGPL-3.0 OR GPL-2.0 OR GPL-3.0
+  pyte                  LGPL-3.0
+  Markdown              BSD-3-Clause
+  pyinstaller           GPL-2.0-or-later (with exception for bundled apps)
+
+Full license texts ship with each package (PyPI / site-packages). When
+distributing a frozen binary that embeds LGPL libraries, comply with the
+applicable LGPL terms for those libraries (including source offers where
+required).
+
+PuTTY and WinSCP are optional external tools launched by HostsKeeper when
+installed on the machine; they are not redistributed in this repository.
+HostsKeeper is not affiliated with, endorsed by, or sponsored by the authors
+of PuTTY, WinSCP, or other third-party products named in the docs or UI.

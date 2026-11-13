@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+build/pyinstaller/
+
+# App / vault (never commit secrets)
+*.vault
+*.vault.bak
+data/
+secrets/
+*.pem
+*.ppk
+id_rsa
+id_ed25519
+.env
+.env.*
+!.env.example
+
+# Node / Tauri / frontend
+node_modules/
+frontend/dist/
+src-tauri/target/
+*.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs / runtime
+*.log
+logs/
+.tmp/
+.cache/
