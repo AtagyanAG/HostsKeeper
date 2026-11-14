@@ -319,31 +319,39 @@ class SessionTab(QWidget):
         worker = _ReconnectWorker(self._sessions, self.session_id)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-
-        def _ok(info) -> None:
-            self._term.reset()
-            self._skip_buffer_to_end()
-            self._on_term_resize(self._term.cols, self._term.rows)
-            self.refresh_chrome()
-            self.status_changed.emit()
-            self._term.setFocus()
-            thread.quit()
-
-        def _err(msg: str) -> None:
-            QMessageBox.critical(self, "Reconnect failed", msg)
-            self.refresh_chrome()
-            thread.quit()
-
-        def _finished() -> None:
-            self._thread = None
-            self._worker = None
-
-        worker.finished.connect(_ok)
-        worker.failed.connect(_err)
-        thread.finished.connect(_finished)
+        # QueuedConnection: plain Python lambdas run on the emitter thread and
+        # crash when they touch QMessageBox / widgets (see tree log AV in _err).
+        worker.finished.connect(
+            self._on_reconnect_ok, Qt.ConnectionType.QueuedConnection
+        )
+        worker.failed.connect(
+            self._on_reconnect_fail, Qt.ConnectionType.QueuedConnection
+        )
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(self._on_reconnect_thread_finished)
         self._worker = worker
         self._thread = thread
         thread.start()
+
+    @Slot(object)
+    def _on_reconnect_ok(self, _info: object) -> None:
+        self._term.reset()
+        self._skip_buffer_to_end()
+        self._on_term_resize(self._term.cols, self._term.rows)
+        self.refresh_chrome()
+        self.status_changed.emit()
+        self._term.setFocus()
+
+    @Slot(str)
+    def _on_reconnect_fail(self, msg: str) -> None:
+        QMessageBox.critical(self, "Reconnect failed", msg)
+        self.refresh_chrome()
+
+    @Slot()
+    def _on_reconnect_thread_finished(self) -> None:
+        self._thread = None
+        self._worker = None
 
     def shutdown_ui(self) -> None:
         self._timer.stop()
