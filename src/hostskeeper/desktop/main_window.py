@@ -145,25 +145,18 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        self._act_connect = QAction("Connect vault", self)
+        self._act_connect = QAction("Connect", self)
         self._act_connect.setCheckable(True)
-        self._act_connect.setToolTip("Unlock selected vault / lock when pressed")
         self._act_connect.triggered.connect(self._on_connect_triggered)
         tb.addAction(self._act_connect)
+        self._sync_connect_action_label(False)
 
         tb.addSeparator()
 
-        self._act_mcp_all = QAction("MCP Enable all", self)
-        self._act_mcp_all.triggered.connect(self._mcp_enable_all)
-        tb.addAction(self._act_mcp_all)
-
-        self._act_mcp_off = QAction("MCP Disable all", self)
-        self._act_mcp_off.triggered.connect(self._mcp_disable_all)
-        tb.addAction(self._act_mcp_off)
-
-        self._act_mcp_cfg = QAction("Copy MCP config", self)
-        self._act_mcp_cfg.triggered.connect(self._copy_mcp_config)
-        tb.addAction(self._act_mcp_cfg)
+        self._act_close_all_tabs = QAction("Close All Tabs", self)
+        self._act_close_all_tabs.setToolTip("Close all SSH session tabs (Welcome stays)")
+        self._act_close_all_tabs.triggered.connect(self._close_all_tabs)
+        tb.addAction(self._act_close_all_tabs)
 
         tb.addSeparator()
         self._act_options = QAction("Options", self)
@@ -173,7 +166,12 @@ class MainWindow(QMainWindow):
     def _open_options(self) -> None:
         from hostskeeper.desktop.options_dialog import OptionsDialog
 
-        dlg = OptionsDialog(self._settings, parent=self)
+        dlg = OptionsDialog(
+            self._settings,
+            parent=self,
+            on_copy_mcp_config=self._copy_mcp_config,
+            on_change_mcp_key=self._change_mcp_key,
+        )
         if dlg.exec() != OptionsDialog.DialogCode.Accepted:
             return
         self._apply_session_connect_timeout()
@@ -201,7 +199,8 @@ class MainWindow(QMainWindow):
         self._vault_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._vault_tree.customContextMenuRequested.connect(self._vault_tree_menu)
         self._vault_tree.itemSelectionChanged.connect(self._on_vault_selection)
-        self._vault_tree.itemDoubleClicked.connect(self._on_vault_double_click)
+        # Use itemActivated only: on Windows a double-click also emits
+        # itemDoubleClicked, which would open UnlockDialog twice.
         self._vault_tree.itemActivated.connect(self._on_vault_activated)
         self._vault_tree.reparent_requested.connect(self._on_vault_reparent)
         self._vault_tree.itemExpanded.connect(self._on_vault_item_expanded)
@@ -387,11 +386,8 @@ class MainWindow(QMainWindow):
         if not self._state.unlocked:
             self._state.vault_path = path
 
-    def _on_vault_activated(self, item: QTreeWidgetItem, col: int = 0) -> None:
-        # Enter / some platforms; same as double-click.
-        self._on_vault_double_click(item, col)
-
-    def _on_vault_double_click(self, item: QTreeWidgetItem, _col: int) -> None:
+    def _on_vault_activated(self, item: QTreeWidgetItem, _col: int = 0) -> None:
+        """Enter or double-click on a vault row → connect."""
         if self._connect_busy:
             return
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -555,9 +551,7 @@ class MainWindow(QMainWindow):
         self._connect_busy = True
         try:
             ok = self._do_disconnect()
-            self._act_connect.blockSignals(True)
-            self._act_connect.setChecked(self._state.unlocked)
-            self._act_connect.blockSignals(False)
+            self._set_connect_checked(self._state.unlocked)
             if not ok and self._state.unlocked:
                 return
         finally:
@@ -637,13 +631,9 @@ class MainWindow(QMainWindow):
             if not ok:
                 if previous is not None and self._state.unlocked:
                     self._highlight_vault_item(previous)
-                self._act_connect.blockSignals(True)
-                self._act_connect.setChecked(self._state.unlocked)
-                self._act_connect.blockSignals(False)
+                self._set_connect_checked(self._state.unlocked)
             else:
-                self._act_connect.blockSignals(True)
-                self._act_connect.setChecked(True)
-                self._act_connect.blockSignals(False)
+                self._set_connect_checked(True)
         finally:
             self._connect_busy = False
 
@@ -656,15 +646,11 @@ class MainWindow(QMainWindow):
                 path = self._selected_vault_path()
                 ok = self._do_connect(path)
                 if not ok:
-                    self._act_connect.blockSignals(True)
-                    self._act_connect.setChecked(False)
-                    self._act_connect.blockSignals(False)
+                    self._set_connect_checked(False)
             else:
                 ok = self._do_disconnect()
                 if not ok:
-                    self._act_connect.blockSignals(True)
-                    self._act_connect.setChecked(True)
-                    self._act_connect.blockSignals(False)
+                    self._set_connect_checked(True)
         finally:
             self._connect_busy = False
 
@@ -782,14 +768,27 @@ class MainWindow(QMainWindow):
                 thread.terminate()
                 thread.wait(1000)
 
+    def _sync_connect_action_label(self, connected: bool | None = None) -> None:
+        """Toolbar label: Connect when locked, Disconnect when vault is open."""
+        if connected is None:
+            connected = bool(self._state.unlocked)
+        if connected:
+            self._act_connect.setText("Disconnect")
+            self._act_connect.setToolTip("Disconnect the current vault and close sessions")
+        else:
+            self._act_connect.setText("Connect")
+            self._act_connect.setToolTip("Unlock the selected vault")
+
+    def _set_connect_checked(self, checked: bool) -> None:
+        self._act_connect.blockSignals(True)
+        self._act_connect.setChecked(checked)
+        self._act_connect.blockSignals(False)
+        self._sync_connect_action_label(checked)
+
     def _set_locked_ui(self) -> None:
         self._connected_vault_path = None
-        self._act_connect.blockSignals(True)
-        self._act_connect.setChecked(False)
-        self._act_connect.blockSignals(False)
-        self._act_mcp_all.setEnabled(False)
-        self._act_mcp_off.setEnabled(False)
-        self._act_mcp_cfg.setEnabled(False)
+        self._set_connect_checked(False)
+        self._act_close_all_tabs.setEnabled(False)
         self._hosts_root.takeChildren()
         self._scripts_root.takeChildren()
         self._hosts_root.addChild(QTreeWidgetItem(["(not connected)"]))
@@ -803,12 +802,8 @@ class MainWindow(QMainWindow):
     def _set_unlocked_ui(self) -> None:
         if self._connected_vault_path is None and self._state.unlocked:
             self._connected_vault_path = Path(self._state.vault_path)
-        self._act_connect.blockSignals(True)
-        self._act_connect.setChecked(True)
-        self._act_connect.blockSignals(False)
-        self._act_mcp_all.setEnabled(True)
-        self._act_mcp_off.setEnabled(True)
-        self._act_mcp_cfg.setEnabled(True)
+        self._set_connect_checked(True)
+        self._act_close_all_tabs.setEnabled(True)
         name = (
             self._connected_vault_path.name
             if self._connected_vault_path is not None
@@ -1889,9 +1884,28 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, kind.upper(), str(exc))
 
+    def _close_all_tabs(self) -> None:
+        n = len(self._session_tabs)
+        if n == 0:
+            QMessageBox.information(self, "Close All Tabs", "No session tabs open.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Close All Tabs",
+            f"Close all {n} session tab(s)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        for sid in list(self._session_tabs.keys()):
+            tab = self._session_tabs.get(sid)
+            if tab is not None:
+                tab.close_session()
+        self._refresh_status_sessions()
+
     def _copy_mcp_config(self) -> None:
-        if not self._state.unlocked or not self._state.mcp_key:
-            QMessageBox.information(self, "MCP", "Connect vault first.")
+        if not self._state.mcp_key:
+            QMessageBox.information(self, "MCP", "MCP key is not available.")
             return
         host = _public_mcp_host(self._state.mcp_host)
         text = cursor_mcp_config(
@@ -1902,18 +1916,26 @@ class MainWindow(QMainWindow):
             f"MCP config copied · http://{host}:{self._state.mcp_port}/mcp?key=…"
         )
 
-    def _mcp_enable_all(self) -> None:
-        if self._state.sessions is None:
+    def _change_mcp_key(self) -> None:
+        reply = QMessageBox.warning(
+            self,
+            "Change MCP Key",
+            "Generate a new MCP app key?\n\n"
+            "The old key stops working immediately. "
+            "Update Cursor mcp.json with Copy MCP config.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
-        self._state.sessions.enable_mcp_all()
-        for tab in self._session_tabs.values():
-            tab.refresh_chrome()
-        self._refresh_status_sessions()
-
-    def _mcp_disable_all(self) -> None:
-        if self._state.sessions is None:
+        try:
+            self._state.rotate_mcp_app_key()
+        except OSError as exc:
+            QMessageBox.warning(self, "Change MCP Key", f"Could not write key:\n{exc}")
             return
-        self._state.sessions.disable_mcp_all()
-        for tab in self._session_tabs.values():
-            tab.refresh_chrome()
-        self._refresh_status_sessions()
+        self._status.showMessage("MCP key changed · use Copy MCP config")
+        QMessageBox.information(
+            self,
+            "Change MCP Key",
+            "New MCP key is active.\nUse Copy MCP config to update Cursor.",
+        )

@@ -23,8 +23,10 @@ python -m hostskeeper
 1. Создайте Host → Address → Credential (ключ/пароль) через ПКМ в дереве.
    Во вкладке **Notes** — Markdown-профиль хоста (ОС, пакеты, runtimes) для ИИ; переключатель **Preview** включает просмотр.
 2. Выберите их → **+** на панели вкладок.
-3. Включите **MCP** на вкладке. Один раз: toolbar **Copy MCP config** → вставьте в Cursor `mcp.json`
+3. Включите **MCP** на вкладке. Один раз: **Options → Copy MCP config** → вставьте в Cursor `mcp.json`
    (`http://<ip>:8765/mcp?key=...`). Дальше ИИ: `session_list` → `session_attach(alias=…)`.
+   В **Options** сверху — путь к `settings.json` (только просмотр): **Open Folder** (Explorer с выделением файла) и **Edit** (Notepad).
+   **Change MCP Key** — новый app key (старый URL перестаёт работать); потом снова **Copy MCP config**.
 4. Чтобы ИИ мог писать в терминал / запускать скрипты — включите **Approve** на вкладке
    (по умолчанию выкл: модель только читает вывод).
 5. Вставьте URL в Cursor MCP / чат ассистенту.

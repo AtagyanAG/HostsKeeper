@@ -8,7 +8,12 @@ from uuid import uuid4
 
 from starlette.testclient import TestClient
 
-from hostskeeper.mcp.app_key import cursor_mcp_config, mcp_gateway_url, resolve_mcp_key
+from hostskeeper.mcp.app_key import (
+    cursor_mcp_config,
+    mcp_gateway_url,
+    resolve_mcp_key,
+    rotate_mcp_key,
+)
 from hostskeeper.mcp.http_app import create_http_app
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session.manager import SessionManager, _SessionState
@@ -45,6 +50,14 @@ def test_resolve_mcp_key_file(tmp_path: Path) -> None:
     k2 = resolve_mcp_key(key_path=path)
     assert k1 == k2
     assert resolve_mcp_key(explicit="override", key_path=path) == "override"
+
+
+def test_rotate_mcp_key_file(tmp_path: Path) -> None:
+    path = tmp_path / "mcp.key"
+    k1 = resolve_mcp_key(key_path=path)
+    k2 = rotate_mcp_key(key_path=path)
+    assert k2 != k1
+    assert resolve_mcp_key(key_path=path) == k2
 
 
 def test_gateway_url_and_cursor_snippet() -> None:

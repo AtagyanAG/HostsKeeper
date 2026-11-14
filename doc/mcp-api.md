@@ -7,7 +7,8 @@
 - Сервер слушает на LAN (host/port приложения).
 - Клиент подключается со **стабильным app key** приложения (не per-tab).
 - Key: `~/.hostskeeper/mcp.key`, env `HOSTSKEEPER_MCP_KEY`, или `--mcp-key`.
-- URL для Cursor (один раз в mcp.json; toolbar **Copy MCP config**):
+- Смена ключа: Options → **Change MCP Key** (перезаписывает файл; старый URL сразу 401). Затем **Copy MCP config**.
+- URL для Cursor (один раз в mcp.json; Options → **Copy MCP config**):
 
 ```text
 http://<safe-host>:<port>/mcp?key=<app-key>

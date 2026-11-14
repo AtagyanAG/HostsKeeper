@@ -57,6 +57,9 @@ class McpToolService:
     def app_key(self) -> str:
         return self._app_key
 
+    def set_app_key(self, key: str) -> None:
+        self._app_key = key or ""
+
     def set_vault_changed_callback(
         self, callback: Callable[[], None] | None
     ) -> None:

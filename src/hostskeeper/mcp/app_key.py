@@ -35,6 +35,23 @@ def resolve_mcp_key(
             if value:
                 return value
     path = key_path or DEFAULT_KEY_PATH
+    return _write_new_key(path)
+
+
+def mcp_key_file_path() -> Path:
+    """Path used for file-backed key (prefer HostsKeeper; else legacy if present)."""
+    if DEFAULT_KEY_PATH.is_file() or not _LEGACY_KEY_PATH.is_file():
+        return DEFAULT_KEY_PATH
+    return _LEGACY_KEY_PATH
+
+
+def rotate_mcp_key(*, key_path: Path | None = None) -> str:
+    """Generate a new app key and overwrite the key file. Returns the new key."""
+    path = key_path or mcp_key_file_path()
+    return _write_new_key(path)
+
+
+def _write_new_key(path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     value = secrets.token_urlsafe(24)
     path.write_text(value + "\n", encoding="utf-8")

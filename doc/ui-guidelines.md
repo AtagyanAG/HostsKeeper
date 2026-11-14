@@ -11,7 +11,7 @@ HostsKeeper — свой продукт (vault + MCP). **Класс интерф
 | Workspace admin-tool | Плотная, спокойная рабочая среда, не «маркетинговый» лендинг и не чат-UI |
 | Левое дерево навигации | Иерархия: Hosts → Addresses/Credentials; отдельно Scripts; индикаторы статуса |
 | Вкладки подключений | Центр = активные сессии; вкладка показывает **alias** (+ иконка типа: SSH tab / PuTTY / WinSCP) |
-| Тулбар / ribbon-команды | Компактная лента действий: Open, Connect target, MCP, Reconnect, Copy MCP config — без перегруза |
+| Тулбар / ribbon-команды | Компактная лента: Connect vault, Close All Tabs, Options — без перегруза |
 | Статусы цветом | Точки/бейджи: live / disconnected / MCP on / Approve on |
 | Поиск по дереву | Фильтр хостов/скриптов в шапке левой панели |
 | Status bar | Краткий лог/статус MCP (listening, клиент connected), без секретов |
@@ -67,7 +67,7 @@ HostsKeeper — свой продукт (vault + MCP). **Класс интерф
 1. **Vault** — Lock  
 2. **Connect** — Open Tab / PuTTY / WinSCP  
 3. **Session** — Reconnect / Disconnect / Close  
-4. **MCP** — Enable / Disable / Enable all / Disable all / Copy MCP config  
+4. **Close All Tabs** — закрыть все SSH-вкладки (с подтверждением); MCP — per-tab; Copy MCP config — в Options  
 5. **Edit** — New Host / Address / Credential / Script  
 
 ### Диалоги
@@ -91,7 +91,7 @@ HostsKeeper — свой продукт (vault + MCP). **Класс интерф
 | Секреты не в MCP | В UI — отдельная кнопка reveal; в status/MCP URL — только token/alias |
 | Сессию открывает человек | Connect только из дерева/ленты |
 | Alias в шапке | Tab title + session chrome |
-| MCP per tab | Toggle на вкладке; Copy MCP config в тулбаре |
+| MCP per tab | Toggle на вкладке; Copy MCP config / Change MCP Key в Options |
 | Approve per session | Checkbox на chrome вкладки (standing permission) |
 | Скрипты без UI-форм params | Редактор body/`{{params}}` в properties; запуск из UI опционален в v1 |
 

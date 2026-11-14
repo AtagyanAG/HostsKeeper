@@ -56,7 +56,7 @@ Spec: `packaging/HostsKeeper.spec` (иконка: `src/hostskeeper/resources/hos
 Зависимости сборки: `pip install -e ".[packaging]"`.
 
 Перед пересборкой закройте запущенный `HostsKeeper.exe` (иначе WinError 5 на запись).  
-Проверка: запуск exe → unlock → Open Tab → MCP / Copy MCP config.  
+Проверка: запуск exe → unlock → Open Tab → MCP / Options → Copy MCP config.  
 Первый старт onefile медленнее (распаковка во temp). SmartScreen может ругаться на неподписанный бинарник.
 
 ## Demo vault для скриншотов

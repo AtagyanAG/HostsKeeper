@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from hostskeeper.mcp.app_key import resolve_mcp_key
+from hostskeeper.mcp.app_key import resolve_mcp_key, rotate_mcp_key
 from hostskeeper.mcp.service import McpToolService
 from hostskeeper.session import SessionManager
 from hostskeeper.vault import Vault
@@ -24,6 +24,14 @@ class AppState:
     def __post_init__(self) -> None:
         if not self.mcp_key:
             self.mcp_key = resolve_mcp_key()
+
+    def rotate_mcp_app_key(self) -> str:
+        """Overwrite mcp.key and apply to running MCP service (if any)."""
+        new_key = rotate_mcp_key()
+        self.mcp_key = new_key
+        if self.mcp_service is not None:
+            self.mcp_service.set_app_key(new_key)
+        return new_key
 
     @property
     def unlocked(self) -> bool:

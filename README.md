@@ -17,7 +17,7 @@ HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You**
 
 1. Unlock a local encrypted vault (hosts, addresses, credentials, scripts).
 2. Open an SSH **Tab** yourself (or launch installed PuTTY / WinSCP). Optional **port knocking** (TCP/UDP sequence) can run on an Address before connect.
-3. Turn **MCP** on for that tab; once: toolbar **Copy MCP config** → paste into Cursor `mcp.json`.
+3. Turn **MCP** on for that tab; once: **Options → Copy MCP config** → paste into Cursor `mcp.json`.
 4. The model uses `session_list` → `session_attach(alias=…)`, then read / subscribe. **Approve** (off by default) is required for write / script run.
 
 Secrets and IPs stay out of MCP payloads. Human and AI share **one PTY per tab**:
@@ -27,7 +27,7 @@ Secrets and IPs stay out of MCP payloads. Human and AI share **one PTY per tab**
 
 ## MCP over HTTP (not just local stdio)
 
-HostsKeeper exposes MCP primarily as an **HTTP** endpoint with a stable **app key** (toolbar **Copy MCP config** → `http://<safe-host>:8765/mcp?key=…`). That is wider than a typical stdio MCP server glued to one local IDE process:
+HostsKeeper exposes MCP primarily as an **HTTP** endpoint with a stable **app key** (**Options → Copy MCP config** → `http://<safe-host>:8765/mcp?key=…`). That is wider than a typical stdio MCP server glued to one local IDE process:
 
 - The AI client can run on the **same PC** (`127.0.0.1`) or on **another machine** that can reach the vault PC.
 - Credentials and SSH stay on the safe host; the client only sees enabled tabs (and scripts) under your MCP rules.
