@@ -49,3 +49,6 @@ desktop.ini
 logs/
 .tmp/
 .cache/
+
+# Local drafts (not in repo yet)
+doc/http-browser-sessions-plan.md

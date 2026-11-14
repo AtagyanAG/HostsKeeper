@@ -120,10 +120,12 @@ class SessionTab(QWidget):
         )
         self._status.setFixedWidth(_status_w + 8)
         self._mcp = QPushButton("MCP")
+        self._mcp.setObjectName("sessionMcpToggle")
         self._mcp.setCheckable(True)
         self._mcp.setToolTip("Enable MCP for this tab.")
         self._mcp.toggled.connect(self._on_mcp_toggled)
         self._approve = QPushButton("Approve")
+        self._approve.setObjectName("sessionApproveToggle")
         self._approve.setCheckable(True)
         self._approve.setToolTip(
             "Allow MCP session_write / scripts_run. Off = read-only for the model."
