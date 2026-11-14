@@ -7,10 +7,8 @@ from enum import Enum
 from pathlib import Path
 from uuid import UUID
 
-from functools import lru_cache
-
 from PySide6.QtCore import QMetaObject, Qt, QThread, Slot
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
@@ -37,6 +35,7 @@ from hostskeeper.desktop.dialogs import (
     ScriptDialog,
 )
 from hostskeeper.desktop.drop_tree import DropTreeWidget
+from hostskeeper.desktop.folder_icon import apply_group_folder_icons, folder_icon
 from hostskeeper.desktop.session_tab import SessionTab, _OpenTabWorker, _public_mcp_host
 from hostskeeper.desktop.unlock_dialog import UnlockDialog
 from hostskeeper.launchers import discover_launchers, launch_putty, launch_winscp
@@ -70,24 +69,7 @@ def _norm_vault_key(path: Path | str) -> str:
     return os.path.normcase(str(resolved))
 
 
-@lru_cache(maxsize=1)
-def _folder_icon() -> QIcon:
-    """Small yellow folder glyph for group nodes."""
-    size = 16
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pm)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    tab = QColor(255, 210, 70)
-    body = QColor(255, 190, 40)
-    edge = QColor(196, 140, 20)
-    painter.setPen(edge)
-    painter.setBrush(tab)
-    painter.drawRoundedRect(1, 2, 7, 4, 1, 1)
-    painter.setBrush(body)
-    painter.drawRoundedRect(1, 5, 14, 10, 1.5, 1.5)
-    painter.end()
-    return QIcon(pm)
+_GROUP_FOLDER_KINDS = frozenset({NodeKind.GROUP.value, NodeKind.VAULT_GROUP.value})
 
 
 class MainWindow(QMainWindow):
@@ -308,7 +290,6 @@ class MainWindow(QMainWindow):
             for node in children:
                 if node.kind == "group":
                     item = QTreeWidgetItem([node.name or "Group"])
-                    item.setIcon(0, _folder_icon())
                     item.setData(
                         0,
                         Qt.ItemDataRole.UserRole,
@@ -329,6 +310,7 @@ class MainWindow(QMainWindow):
                     else:
                         parent_item.addChild(item)
                     add_children(item, node.id)
+                    item.setIcon(0, folder_icon(filled=item.childCount() > 0))
                     item.setExpanded(self._settings.vault_group_expanded(node.id))
                 elif node.kind == "vault" and node.path:
                     path = Path(node.path)
@@ -847,7 +829,6 @@ class MainWindow(QMainWindow):
                 return group_items[group_id]
             group = groups[group_id]
             item = QTreeWidgetItem([group.name])
-            item.setIcon(0, _folder_icon())
             item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -924,6 +905,8 @@ class MainWindow(QMainWindow):
             else:
                 self._scripts_root.addChild(item)
 
+        apply_group_folder_icons(self._hosts_root, group_kinds=_GROUP_FOLDER_KINDS)
+        apply_group_folder_icons(self._scripts_root, group_kinds=_GROUP_FOLDER_KINDS)
         self._hosts_root.setExpanded(vault.tree_root_expanded("hosts"))
         self._scripts_root.setExpanded(vault.tree_root_expanded("scripts"))
         self._apply_filter(self._search.text())

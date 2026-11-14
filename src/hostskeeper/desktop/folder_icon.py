@@ -1,0 +1,48 @@
+"""Folder glyphs for group nodes: pale = empty, saturated = has children."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QTreeWidgetItem
+
+
+def folder_icon(*, filled: bool) -> QIcon:
+    """16×16 folder: empty is pale; non-empty uses saturated yellow."""
+    size = 16
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if filled:
+        tab = QColor(255, 210, 70)
+        body = QColor(255, 190, 40)
+        edge = QColor(196, 140, 20)
+    else:
+        tab = QColor(255, 240, 200)
+        body = QColor(255, 230, 160)
+        edge = QColor(210, 185, 120)
+    painter.setPen(edge)
+    painter.setBrush(tab)
+    painter.drawRoundedRect(1, 2, 7, 4, 1, 1)
+    painter.setBrush(body)
+    painter.drawRoundedRect(1, 5, 14, 10, 1.5, 1.5)
+    painter.end()
+    return QIcon(pm)
+
+
+def apply_group_folder_icons(
+    item: QTreeWidgetItem,
+    *,
+    group_kinds: frozenset[str],
+) -> None:
+    """Set folder icon on group nodes from direct childCount (recursive)."""
+    data = item.data(0, Qt.ItemDataRole.UserRole)
+    kind = data.get("kind") if isinstance(data, dict) else None
+    kind_key = getattr(kind, "value", kind)
+    if kind_key in group_kinds:
+        item.setIcon(0, folder_icon(filled=item.childCount() > 0))
+    for i in range(item.childCount()):
+        child = item.child(i)
+        if child is not None:
+            apply_group_folder_icons(child, group_kinds=group_kinds)

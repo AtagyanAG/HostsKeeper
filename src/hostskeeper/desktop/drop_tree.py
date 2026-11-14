@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
 HOSTSKEEPER_NODE_MIME = "application/x-hostskeeper-node"
 _LEGACY_NODE_MIME = "application/x-hostssafe-node"
 _NODE_MIMES = (HOSTSKEEPER_NODE_MIME, _LEGACY_NODE_MIME)
-_GUIDE_COLOR = QColor(180, 180, 180)
+# Hierarchy guides: ~half as visible as solid mid-gray (alpha ≈ 0.5).
+_GUIDE_COLOR = QColor(180, 180, 180, 128)
 
 
 class _TreeGuideStyle(QProxyStyle):

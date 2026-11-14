@@ -6,7 +6,6 @@ from collections.abc import Callable
 from uuid import UUID
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -21,25 +20,14 @@ from PySide6.QtWidgets import (
 
 from hostskeeper.desktop.dialogs import ScriptDialog
 from hostskeeper.desktop.drop_tree import DropTreeWidget
+from hostskeeper.desktop.folder_icon import apply_group_folder_icons
 from hostskeeper.vault import Group, Script
 from hostskeeper.vault.errors import NotFoundError
 from hostskeeper.vault.store import Vault
 
 NodePayload = dict
 
-
-def _folder_icon() -> QIcon:
-    pix = QPixmap(16, 16)
-    pix.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pix)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#e2b007"))
-    painter.setPen(QColor("#8a6d00"))
-    painter.drawRoundedRect(2, 5, 12, 9, 1, 1)
-    painter.setBrush(QColor("#f0c93a"))
-    painter.drawRoundedRect(4, 3, 7, 4, 1, 1)
-    painter.end()
-    return QIcon(pix)
+_SCRIPT_GROUP_KINDS = frozenset({"group"})
 
 
 class HostScriptsPanel(QWidget):
@@ -171,7 +159,6 @@ class HostScriptsPanel(QWidget):
                 return group_items[gid]
             group = groups[gid]
             item = QTreeWidgetItem([group.name])
-            item.setIcon(0, _folder_icon())
             item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -222,6 +209,10 @@ class HostScriptsPanel(QWidget):
                 group_items[script.group_id].addChild(item)
             else:
                 self._tree.addTopLevelItem(item)
+        for i in range(self._tree.topLevelItemCount()):
+            top = self._tree.topLevelItem(i)
+            if top is not None:
+                apply_group_folder_icons(top, group_kinds=_SCRIPT_GROUP_KINDS)
         self._sync_selection_actions()
 
     def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
