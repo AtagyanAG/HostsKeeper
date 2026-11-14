@@ -248,7 +248,14 @@ Update — по `id` или `name` (+ `host_id` при неоднозначно�
 
 Дерево групп (`kind=scripts|hosts`). Шаблонные scripts-группы всегда; host-группы — при открытой вкладке хоста.  
 Поле `expanded` (UI) в ответах **не** отдаётся.  
-Create: `name`, `kind?`, `parent_id?`, `host_id?`. Update/delete по `id`. Без approve.
+Create: `name`, `kind?`, `parent_id?`, `host_id?`. Update/delete по `id`. Без approve.  
+`groups_delete` — **рекурсивно** удаляет подгруппы и всё содержимое (hosts/scripts/notes).
+
+### notes_list / notes_get / notes_create / notes_update / notes_delete
+
+Только заметки с `mcp_enabled=true`. Видимость host-local — как у scripts (нужна MCP-вкладка хоста).  
+Create всегда ставит `mcp_enabled=true` (параметра нет). Update **не** меняет `mcp_enabled`. Без Approve.  
+Поля: `name`, `body` (Markdown), `group_id?`, `host_id?`.
 
 ## Ошибки (логический код)
 

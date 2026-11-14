@@ -51,6 +51,11 @@ def run_desktop(
 
     assert app is not None
 
+    from hostskeeper.desktop.theme import apply_app_theme, wire_system_theme_watcher
+
+    apply_app_theme(settings.ui_theme)
+    wire_system_theme_watcher()
+
     icon_file = app_icon_path()
     if icon_file is not None:
         icon = QIcon(str(icon_file))

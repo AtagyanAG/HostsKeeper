@@ -86,6 +86,20 @@ def test_tab_connect_timeout_default_and_persist(tmp_path, monkeypatch) -> None:
     assert loaded.tab_connect_timeout_sec == 10
 
 
+def test_ui_theme_default_and_persist(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    s = settings_mod.AppSettings.load()
+    assert s.ui_theme == "system"
+    s.ui_theme = "dark"
+    s.save()
+    loaded = settings_mod.AppSettings.load()
+    assert loaded.ui_theme == "dark"
+    raw = json.loads(
+        (Path(tmp_path) / "HostsKeeper" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert raw["ui_theme"] == "dark"
+
+
 def test_tab_connect_timeout_migrates_legacy_key(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("APPDATA", str(tmp_path))
     path = settings_mod.settings_path()

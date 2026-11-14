@@ -4,15 +4,17 @@
 
 ```text
 Group (kind=hosts|scripts, parent_id?, host_id?) 1──* Group
-Group 1──* Host | Script   (через group_id; null = корень дерева)
+Group 1──* Host | Script | Note   (через group_id; null = корень дерева)
 
 Host 1──* Address
 Host 1──* Credential
-Host 1──* Script (host_id) + Group(kind=scripts, host_id)   — локальные скрипты хоста
+Host 1──* Script|Note (host_id) + Group(kind=scripts, host_id)   — локальные скрипты/заметки хоста
 Host ── defaults ──► Address?, Credential?
 
-Script.host_id=null — шаблон (дерево Scripts слева)
-Script.host_id=Host — скрипт только этого хоста (вкладка Scripts в Edit Host)
+Script/Note.host_id=null — шаблон (дерево Scripts слева)
+Script/Note.host_id=Host — только этого хоста (вкладка Scripts в Edit Host)
+
+Удаление Group — рекурсивно удаляет всё содержимое (подгруппы + hosts/scripts/notes).
 
 Session (runtime, не в vault):
   → snapshot выбора Host + Address + Credential
@@ -103,7 +105,23 @@ Session (runtime, не в vault):
 | host_id | UUID? | `null` = шаблон; иначе скрипт хоста |
 | created_at / updated_at | datetime | |
 
-Удаление Host каскадно удаляет его Address/Credential/Script и host-группы Scripts.
+Удаление Host каскадно удаляет его Address/Credential/Script/Note и host-группы Scripts.
+
+## Note
+
+Markdown-лист в деревьях Scripts (не путать с Host → Notes / `profile`).
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID | Первичный ключ |
+| name | string | Уникально в пределах `host_id` |
+| body | string | Markdown |
+| group_id | UUID? | Та же папка scripts, что у Script |
+| host_id | UUID? | `null` = шаблон; иначе заметка хоста |
+| mcp_enabled | bool | UI-чекбокс; default false (человек); create через MCP всегда true |
+| created_at / updated_at | datetime | |
+
+MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-local при открытой MCP-вкладке). Approve не требуется. `notes_update` не меняет `mcp_enabled`.
 
 ### Parameter
 

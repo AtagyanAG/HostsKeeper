@@ -337,9 +337,96 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
 
     @mcp.tool()
     def groups_delete(id: str) -> str:
-        """Delete a group (children move to parent)."""
+        """Delete a group and all nested content (hosts/scripts/notes/groups)."""
         try:
             return _dump(service.groups_delete(get_access(), id=id))
+        except McpToolError as exc:
+            return _tool_error(exc)
+
+    @mcp.tool()
+    def notes_list() -> str:
+        """List MCP-enabled notes (templates + host notes for open MCP tabs)."""
+        try:
+            return _dump(service.notes_list(get_access()))
+        except McpToolError as exc:
+            return _tool_error(exc)
+
+    @mcp.tool()
+    def notes_get(
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+    ) -> str:
+        """Get an MCP-enabled note including Markdown body."""
+        try:
+            return _dump(
+                service.notes_get(
+                    get_access(), id=id, name=name, host_id=host_id
+                )
+            )
+        except McpToolError as exc:
+            return _tool_error(exc)
+
+    @mcp.tool()
+    def notes_create(
+        name: str,
+        body: str = "",
+        host_id: str | None = None,
+        group_id: str | None = None,
+    ) -> str:
+        """Create a note (always MCP-enabled; no Approve)."""
+        try:
+            return _dump(
+                service.notes_create(
+                    get_access(),
+                    name=name,
+                    body=body,
+                    host_id=host_id,
+                    group_id=group_id,
+                )
+            )
+        except McpToolError as exc:
+            return _tool_error(exc)
+
+    @mcp.tool()
+    def notes_update(
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+        body: str | None = None,
+        new_name: str | None = None,
+        group_id: str | None = None,
+    ) -> str:
+        """Update note name/body/group (mcp_enabled unchanged; no Approve)."""
+        try:
+            kwargs: dict = {
+                "id": id,
+                "name": name,
+                "host_id": host_id,
+                "body": body,
+                "new_name": new_name,
+            }
+            # Omit group_id when None so it is not cleared unintentionally.
+            # Pass empty string to clear group.
+            if group_id is not None:
+                kwargs["group_id"] = group_id if group_id != "" else None
+            return _dump(service.notes_update(get_access(), **kwargs))
+        except McpToolError as exc:
+            return _tool_error(exc)
+
+    @mcp.tool()
+    def notes_delete(
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+    ) -> str:
+        """Delete an MCP-enabled note (no Approve)."""
+        try:
+            return _dump(
+                service.notes_delete(
+                    get_access(), id=id, name=name, host_id=host_id
+                )
+            )
         except McpToolError as exc:
             return _tool_error(exc)
 

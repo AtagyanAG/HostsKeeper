@@ -31,6 +31,69 @@ def folder_icon(*, filled: bool) -> QIcon:
     return QIcon(pm)
 
 
+def note_icon(*, mcp_enabled: bool = False) -> QIcon:
+    """16×16 document leaf; slightly bluer when MCP-enabled."""
+    size = 16
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if mcp_enabled:
+        fill = QColor(210, 230, 255)
+        edge = QColor(70, 110, 170)
+    else:
+        fill = QColor(245, 245, 245)
+        edge = QColor(120, 120, 120)
+    painter.setPen(edge)
+    painter.setBrush(fill)
+    painter.drawRoundedRect(3, 1, 10, 14, 1.5, 1.5)
+    painter.drawLine(5, 5, 11, 5)
+    painter.drawLine(5, 8, 11, 8)
+    painter.drawLine(5, 11, 9, 11)
+    painter.end()
+    return QIcon(pm)
+
+
+def host_icon() -> QIcon:
+    """16×16 host/server glyph."""
+    size = 16
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    edge = QColor(70, 100, 140)
+    fill = QColor(180, 205, 235)
+    face = QColor(230, 240, 250)
+    painter.setPen(edge)
+    painter.setBrush(fill)
+    painter.drawRoundedRect(2, 1, 12, 10, 1.5, 1.5)
+    painter.setBrush(face)
+    painter.drawRect(4, 3, 8, 5)
+    painter.drawLine(5, 13, 11, 13)
+    painter.drawLine(8, 11, 8, 13)
+    painter.end()
+    return QIcon(pm)
+
+
+def script_icon() -> QIcon:
+    """16×16 shell/script glyph."""
+    size = 16
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    edge = QColor(40, 100, 70)
+    fill = QColor(220, 245, 230)
+    painter.setPen(edge)
+    painter.setBrush(fill)
+    painter.drawRoundedRect(2, 1, 12, 14, 1.5, 1.5)
+    painter.drawLine(5, 5, 7, 7)
+    painter.drawLine(7, 7, 5, 9)
+    painter.drawLine(8, 11, 11, 11)
+    painter.end()
+    return QIcon(pm)
+
+
 def apply_group_folder_icons(
     item: QTreeWidgetItem,
     *,

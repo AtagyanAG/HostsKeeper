@@ -10,6 +10,9 @@ from uuid import UUID
 from PySide6.QtCore import QMetaObject, Qt, QThread, Slot
 from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QInputDialog,
     QLabel,
@@ -30,12 +33,19 @@ from hostskeeper.desktop.dialogs import (
     AddressDialog,
     CredentialDialog,
     HostDialog,
+    NoteDialog,
     RevealSecretDialog,
     RunScriptTargetDialog,
     ScriptDialog,
 )
 from hostskeeper.desktop.drop_tree import DropTreeWidget
-from hostskeeper.desktop.folder_icon import apply_group_folder_icons, folder_icon
+from hostskeeper.desktop.folder_icon import (
+    apply_group_folder_icons,
+    folder_icon,
+    host_icon,
+    note_icon,
+    script_icon,
+)
 from hostskeeper.desktop.session_tab import SessionTab, _OpenTabWorker, _public_mcp_host
 from hostskeeper.desktop.unlock_dialog import UnlockDialog
 from hostskeeper.launchers import discover_launchers, launch_putty, launch_winscp
@@ -54,6 +64,7 @@ class NodeKind(str, Enum):
     ADDRESS = "address"
     CREDENTIAL = "credential"
     SCRIPT = "script"
+    NOTE = "note"
     VAULT = "vault"
     GROUP = "group"
     VAULT_GROUP = "vault_group"
@@ -156,6 +167,9 @@ class MainWindow(QMainWindow):
         )
         if dlg.exec() != OptionsDialog.DialogCode.Accepted:
             return
+        from hostskeeper.desktop.theme import apply_app_theme
+
+        apply_app_theme(self._settings.ui_theme)
         self._apply_session_connect_timeout()
 
     def _apply_session_connect_timeout(self) -> None:
@@ -194,7 +208,7 @@ class MainWindow(QMainWindow):
         hosts_layout = QVBoxLayout(hosts_wrap)
         hosts_layout.setContentsMargins(4, 0, 4, 4)
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Search hosts / scripts…")
+        self._search.setPlaceholderText("Search hosts / scripts / notes…")
         self._search.textChanged.connect(self._apply_filter)
         hosts_layout.addWidget(self._search)
 
@@ -491,16 +505,46 @@ class MainWindow(QMainWindow):
         self._refresh_vault_tree()
 
     def _delete_vault_group(self, group_id: str) -> None:
-        if (
-            QMessageBox.question(
-                self,
-                "Delete group",
-                "Delete this group? Vaults inside move to the parent level.",
+        counts = self._settings.vault_group_content_counts(group_id)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Delete group")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(
+            QLabel(
+                "Delete this group and all contents?\n\n"
+                f"{counts['groups']} subgroup(s), {counts['vaults']} vault(s)."
             )
-            != QMessageBox.StandardButton.Yes
-        ):
+        )
+        cb = QCheckBox("Also delete vault files from disk")
+        cb.setChecked(False)
+        layout.addWidget(cb)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Yes).setText("Delete")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self._settings.delete_vault_group(group_id)
+        delete_files = cb.isChecked()
+        paths = self._settings.delete_vault_group(
+            group_id, delete_files=delete_files
+        )
+        if delete_files:
+            for raw in paths:
+                path = Path(raw)
+                if self._is_connected_vault(path):
+                    self._do_disconnect()
+                try:
+                    if path.is_file():
+                        path.unlink()
+                except OSError as exc:
+                    QMessageBox.warning(
+                        self,
+                        "Delete group",
+                        f"Could not delete file:\n{path}\n{exc}",
+                    )
         self._refresh_vault_tree()
 
     def _on_vault_reparent(
@@ -863,6 +907,7 @@ class MainWindow(QMainWindow):
 
         for host in sorted(vault.list_hosts(), key=lambda h: h.name.lower()):
             host_item = QTreeWidgetItem([host.name])
+            host_item.setIcon(0, host_icon())
             host_item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -886,6 +931,7 @@ class MainWindow(QMainWindow):
             vault.list_scripts(only_templates=True), key=lambda s: s.name.lower()
         ):
             item = QTreeWidgetItem([script.name])
+            item.setIcon(0, script_icon())
             item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -902,6 +948,30 @@ class MainWindow(QMainWindow):
             )
             if script.group_id and script.group_id in group_items:
                 group_items[script.group_id].addChild(item)
+            else:
+                self._scripts_root.addChild(item)
+
+        for note in sorted(
+            vault.list_notes(only_templates=True), key=lambda n: n.name.lower()
+        ):
+            item = QTreeWidgetItem([note.name])
+            item.setIcon(0, note_icon(mcp_enabled=note.mcp_enabled))
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "kind": NodeKind.NOTE,
+                    "id": note.id,
+                    "group_id": note.group_id,
+                },
+            )
+            item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsDragEnabled
+            )
+            if note.group_id and note.group_id in group_items:
+                group_items[note.group_id].addChild(item)
             else:
                 self._scripts_root.addChild(item)
 
@@ -1098,38 +1168,21 @@ class MainWindow(QMainWindow):
             return
         kind = node.get("kind")
         if kind == NodeKind.HOSTS_ROOT:
-            menu.addAction("New Host", self._new_host)
-            menu.addAction(
-                "New group…",
-                lambda: self._new_workspace_group("hosts", None),
-            )
+            self._fill_hosts_new_menu(menu, group_id=None)
         elif kind == NodeKind.SCRIPTS_ROOT:
-            self._fill_scripts_root_menu(menu)
+            self._fill_scripts_new_menu(menu, group_id=None)
         elif kind == NodeKind.GROUP:
             scope = node.get("scope") or "hosts"
             gid = node["id"]
             if scope == "hosts":
-                menu.addAction(
-                    "New Host",
-                    lambda g=gid: self._new_host(group_id=g),
-                )
+                self._fill_hosts_new_menu(menu, group_id=gid)
             else:
-                menu.addAction(
-                    "New Script",
-                    lambda g=gid: self._new_script(group_id=g),
-                )
-            menu.addAction(
-                "New group…",
-                lambda s=scope, g=gid: self._new_workspace_group(s, g),
-            )
+                self._fill_scripts_new_menu(menu, group_id=gid)
             menu.addSeparator()
             menu.addAction("Rename group…", lambda g=gid: self._rename_workspace_group(g))
             menu.addAction("Delete group", lambda g=gid: self._delete_workspace_group(g))
         elif kind == NodeKind.HOST:
-            menu.addAction(
-                "New group…",
-                lambda g=node.get("group_id"): self._new_workspace_group("hosts", g),
-            )
+            self._fill_hosts_new_menu(menu, group_id=node.get("group_id"))
             menu.addSeparator()
             menu.addAction("Open Tab…", self.open_selected_tab)
             menu.addAction("PuTTY…", lambda: self._launch_external("putty"))
@@ -1138,24 +1191,46 @@ class MainWindow(QMainWindow):
             menu.addAction("Edit Host", lambda: self._edit_host(node["id"]))
             menu.addAction("Delete Host", lambda: self._delete_host(node["id"]))
         elif kind == NodeKind.SCRIPT:
-            menu.addAction(
-                "New group…",
-                lambda g=node.get("group_id"): self._new_workspace_group("scripts", g),
-            )
+            self._fill_scripts_new_menu(menu, group_id=node.get("group_id"))
             menu.addSeparator()
             menu.addAction("Run…", lambda: self._run_template_script(node["id"]))
             menu.addAction("Copy", lambda: self._copy_script(node["id"]))
             menu.addAction("Edit", lambda: self._edit_script(node["id"]))
             menu.addAction("Delete", lambda: self._delete_script(node["id"]))
+        elif kind == NodeKind.NOTE:
+            self._fill_scripts_new_menu(menu, group_id=node.get("group_id"))
+            menu.addSeparator()
+            menu.addAction("Edit", lambda: self._edit_note(node["id"]))
+            menu.addAction("Delete", lambda: self._delete_note(node["id"]))
         if not menu.isEmpty():
             menu.exec(self._tree.viewport().mapToGlobal(pos))
 
-    def _fill_scripts_root_menu(self, menu: QMenu) -> None:
-        menu.addAction("New Script", self._new_script)
-        menu.addAction(
-            "New group…",
-            lambda: self._new_workspace_group("scripts", None),
+    def _fill_hosts_new_menu(
+        self, menu: QMenu, *, group_id: UUID | None
+    ) -> None:
+        new_menu = menu.addMenu("New")
+        act_group = new_menu.addAction(folder_icon(filled=False), "Group")
+        act_group.triggered.connect(
+            lambda: self._new_workspace_group("hosts", group_id)
         )
+        act_host = new_menu.addAction(host_icon(), "Host")
+        act_host.triggered.connect(lambda: self._new_host(group_id=group_id))
+
+    def _fill_scripts_new_menu(
+        self, menu: QMenu, *, group_id: UUID | None
+    ) -> None:
+        new_menu = menu.addMenu("New")
+        act_group = new_menu.addAction(folder_icon(filled=False), "Group")
+        act_group.triggered.connect(
+            lambda: self._new_workspace_group("scripts", group_id)
+        )
+        act_script = new_menu.addAction(script_icon(), "Script")
+        act_script.triggered.connect(lambda: self._new_script(group_id=group_id))
+        act_note = new_menu.addAction(note_icon(), "Note")
+        act_note.triggered.connect(lambda: self._new_note(group_id=group_id))
+
+    def _fill_scripts_root_menu(self, menu: QMenu) -> None:
+        self._fill_scripts_new_menu(menu, group_id=None)
 
     def _new_workspace_group(
         self, kind: str, parent_id: UUID | None
@@ -1185,11 +1260,22 @@ class MainWindow(QMainWindow):
         self.refresh_tree()
 
     def _delete_workspace_group(self, group_id: UUID) -> None:
+        try:
+            counts = self._vault().group_content_counts(group_id)
+        except NotFoundError:
+            return
+        msg = (
+            "Delete this group and all contents?\n\n"
+            f"{counts['groups']} subgroup(s), {counts['hosts']} host(s), "
+            f"{counts['scripts']} script(s), {counts['notes']} note(s)."
+        )
         if (
-            QMessageBox.question(
+            QMessageBox.warning(
                 self,
                 "Delete group",
-                "Delete this group? Items inside move to the parent level.",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
             != QMessageBox.StandardButton.Yes
         ):
@@ -1209,7 +1295,7 @@ class MainWindow(QMainWindow):
         if not src:
             return
         kind = src.get("kind")
-        if kind not in (NodeKind.HOST, NodeKind.SCRIPT, NodeKind.GROUP):
+        if kind not in (NodeKind.HOST, NodeKind.SCRIPT, NodeKind.NOTE, NodeKind.GROUP):
             return
 
         new_group_id: UUID | None = None
@@ -1233,7 +1319,7 @@ class MainWindow(QMainWindow):
         elif dst_kind == NodeKind.HOST:
             dst_scope = "hosts"
             new_group_id = dst.get("group_id")
-        elif dst_kind == NodeKind.SCRIPT:
+        elif dst_kind in (NodeKind.SCRIPT, NodeKind.NOTE):
             dst_scope = "scripts"
             new_group_id = dst.get("group_id")
         else:
@@ -1255,6 +1341,13 @@ class MainWindow(QMainWindow):
                 script = self._vault().get_script(src["id"])
                 script.group_id = new_group_id
                 self._vault().update_script(script)
+            elif kind == NodeKind.NOTE:
+                if dst_scope != "scripts":
+                    self.refresh_tree()
+                    return
+                note = self._vault().get_note(src["id"])
+                note.group_id = new_group_id
+                self._vault().update_note(note)
             elif kind == NodeKind.GROUP:
                 group = self._vault().get_group(src["id"])
                 if dst_scope != group.kind:
@@ -1279,6 +1372,8 @@ class MainWindow(QMainWindow):
             self._edit_host(node["id"])
         elif kind == NodeKind.SCRIPT:
             self._edit_script(node["id"])
+        elif kind == NodeKind.NOTE:
+            self._edit_note(node["id"])
 
     def _vault(self):
         assert self._state.vault is not None
@@ -1325,7 +1420,7 @@ class MainWindow(QMainWindow):
             QMessageBox.question(
                 self,
                 "Delete Host",
-                f"Delete host «{host.name}» and its addresses/credentials/scripts?",
+                f"Delete host «{host.name}» and its addresses/credentials/scripts/notes?",
             )
             != QMessageBox.StandardButton.Yes
         ):
@@ -1405,6 +1500,37 @@ class MainWindow(QMainWindow):
         dlg = ScriptDialog(self._vault(), parent=self, group_id=group_id)
         if dlg.exec() == ScriptDialog.DialogCode.Accepted:
             self.refresh_tree()
+
+    def _new_note(self, group_id: UUID | None = None) -> None:
+        if not self._state.unlocked:
+            return
+        dlg = NoteDialog(self._vault(), parent=self, group_id=group_id)
+        if dlg.exec() == NoteDialog.DialogCode.Accepted:
+            self.refresh_tree()
+
+    def _edit_note(self, note_id: UUID) -> None:
+        try:
+            note = self._vault().get_note(note_id)
+        except NotFoundError:
+            return
+        dlg = NoteDialog(self._vault(), note=note, parent=self)
+        if dlg.exec() == NoteDialog.DialogCode.Accepted:
+            self.refresh_tree()
+
+    def _delete_note(self, note_id: UUID) -> None:
+        try:
+            note = self._vault().get_note(note_id)
+        except NotFoundError:
+            return
+        if (
+            QMessageBox.question(
+                self, "Delete Note", f"Delete note «{note.name}»?"
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self._vault().delete_note(note_id)
+        self.refresh_tree()
 
     def _edit_script(self, script_id: UUID) -> None:
         try:

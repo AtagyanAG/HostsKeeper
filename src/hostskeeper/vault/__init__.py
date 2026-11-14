@@ -13,6 +13,7 @@ from hostskeeper.vault.models import (
     Credential,
     Group,
     Host,
+    Note,
     Script,
     ScriptParameter,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "Host",
     "InvalidPasswordError",
     "NotFoundError",
+    "Note",
     "Script",
     "ScriptParameter",
     "ValidationError",

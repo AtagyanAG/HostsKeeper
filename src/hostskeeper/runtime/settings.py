@@ -91,6 +91,8 @@ class AppSettings:
     winscp_path: str | None = None
     # SSH connect timeout for Tab sessions (PuTTY/WinSCP use their own).
     tab_connect_timeout_sec: int = 3
+    # UI theme: system | light | dark
+    ui_theme: str = "system"
     # Vaults sidebar: group id → expanded (default True when missing).
     vault_tree_expanded: dict[str, bool] = field(default_factory=dict)
 
@@ -166,6 +168,13 @@ class AppSettings:
             timeout_sec = 3
         if timeout_sec < 1:
             timeout_sec = 1
+        theme_raw = raw.get("ui_theme", "system")
+        ui_theme = (
+            theme_raw.strip().lower()
+            if isinstance(theme_raw, str) and theme_raw.strip().lower()
+            in ("system", "light", "dark")
+            else "system"
+        )
         expanded_raw = raw.get("vault_tree_expanded") or {}
         vault_tree_expanded: dict[str, bool] = {}
         if isinstance(expanded_raw, dict):
@@ -178,6 +187,7 @@ class AppSettings:
             putty_path=putty_s,
             winscp_path=winscp_s,
             tab_connect_timeout_sec=timeout_sec,
+            ui_theme=ui_theme,
             vault_tree_expanded=vault_tree_expanded,
         )
 
@@ -192,6 +202,9 @@ class AppSettings:
             "putty_path": self.putty_path,
             "winscp_path": self.winscp_path,
             "tab_connect_timeout_sec": int(self.tab_connect_timeout_sec),
+            "ui_theme": self.ui_theme
+            if self.ui_theme in ("system", "light", "dark")
+            else "system",
             "vault_tree_expanded": {
                 k: bool(v) for k, v in self.vault_tree_expanded.items()
             },
@@ -322,20 +335,58 @@ class AppSettings:
                 self.save()
                 return
 
-    def delete_vault_group(self, group_id: str) -> None:
+    def vault_descendant_group_ids(self, group_id: str) -> set[str]:
+        result: set[str] = {group_id}
+        changed = True
+        while changed:
+            changed = False
+            for node in self.vault_nodes:
+                if (
+                    node.kind == "group"
+                    and node.parent_id in result
+                    and node.id not in result
+                ):
+                    result.add(node.id)
+                    changed = True
+        return result
+
+    def vault_group_content_counts(self, group_id: str) -> dict[str, int]:
+        ids = self.vault_descendant_group_ids(group_id)
+        vaults = sum(
+            1
+            for n in self.vault_nodes
+            if n.kind == "vault" and n.parent_id in ids
+        )
+        return {"groups": len(ids) - 1, "vaults": vaults}
+
+    def delete_vault_group(
+        self, group_id: str, *, delete_files: bool = False
+    ) -> list[str]:
+        """Recursively remove group and contents from the list.
+
+        Returns vault file paths when delete_files is True (caller deletes on disk).
+        """
         target = next(
             (n for n in self.vault_nodes if n.kind == "group" and n.id == group_id),
             None,
         )
         if target is None:
-            return
-        new_parent = target.parent_id
-        for node in self.vault_nodes:
-            if node.parent_id == group_id:
-                node.parent_id = new_parent
-        self.vault_nodes = [n for n in self.vault_nodes if n.id != group_id]
-        self.vault_tree_expanded.pop(group_id, None)
+            return []
+        ids = self.vault_descendant_group_ids(group_id)
+        paths: list[str] = []
+        if delete_files:
+            for n in self.vault_nodes:
+                if n.kind == "vault" and n.parent_id in ids and n.path:
+                    paths.append(n.path)
+        self.vault_nodes = [
+            n
+            for n in self.vault_nodes
+            if n.id not in ids and not (n.kind == "vault" and n.parent_id in ids)
+        ]
+        for gid in ids:
+            self.vault_tree_expanded.pop(gid, None)
         self.save()
+        return paths
 
     def move_vault_node(self, node_id: str, parent_id: str | None) -> None:
         node = next((n for n in self.vault_nodes if n.id == node_id), None)

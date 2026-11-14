@@ -25,6 +25,7 @@ from hostskeeper.vault.models import (
     Credential,
     Group,
     Host,
+    Note,
     Script,
 )
 
@@ -43,6 +44,7 @@ class Vault:
         self._addresses: dict[UUID, Address] = {}
         self._credentials: dict[UUID, Credential] = {}
         self._scripts: dict[UUID, Script] = {}
+        self._notes: dict[UUID, Note] = {}
         self._groups: dict[UUID, Group] = {}
         # UI tree chrome (encrypted with vault). Roots default expanded.
         self._ui_tree: dict[str, bool] = {
@@ -91,6 +93,10 @@ class Vault:
             UUID(k): Script.from_dict(v)
             for k, v in (payload.get("scripts") or {}).items()
         }
+        self._notes = {
+            UUID(k): Note.from_dict(v)
+            for k, v in (payload.get("notes") or {}).items()
+        }
         self._groups = {
             UUID(k): Group.from_dict(v)
             for k, v in (payload.get("groups") or {}).items()
@@ -112,6 +118,7 @@ class Vault:
         self._addresses.clear()
         self._credentials.clear()
         self._scripts.clear()
+        self._notes.clear()
         self._groups.clear()
         self._ui_tree = {
             "hosts_root_expanded": True,
@@ -129,6 +136,7 @@ class Vault:
                 str(k): v.to_dict() for k, v in self._credentials.items()
             },
             "scripts": {str(k): v.to_dict() for k, v in self._scripts.items()},
+            "notes": {str(k): v.to_dict() for k, v in self._notes.items()},
             "groups": {str(k): v.to_dict() for k, v in self._groups.items()},
             "ui_tree": {
                 "hosts_root_expanded": bool(
@@ -245,6 +253,8 @@ class Vault:
             s.id for s in self._scripts.values() if s.host_id == host_id
         ]:
             del self._scripts[script_id]
+        for note_id in [n.id for n in self._notes.values() if n.host_id == host_id]:
+            del self._notes[note_id]
         for group_id in [
             g.id for g in self._groups.values() if g.host_id == host_id
         ]:
@@ -434,6 +444,98 @@ class Vault:
         del self._scripts[script_id]
         self.save()
 
+    # --- Note ---
+
+    def _note_name_taken(
+        self,
+        name: str,
+        *,
+        host_id: UUID | None,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        for note in self._notes.values():
+            if (
+                note.name == name
+                and note.host_id == host_id
+                and note.id != exclude_id
+            ):
+                return True
+        return False
+
+    def add_note(self, note: Note) -> Note:
+        self._require_unlocked()
+        if note.id in self._notes:
+            raise ValidationError(f"note already exists: {note.id}")
+        if note.host_id is not None and note.host_id not in self._hosts:
+            raise ValidationError(f"unknown host_id: {note.host_id}")
+        if not (note.name or "").strip():
+            raise ValidationError("note name must not be empty")
+        if self._note_name_taken(note.name, host_id=note.host_id):
+            raise ValidationError(f"note name already exists: {note.name}")
+        self._validate_group_ref(
+            note.group_id, kind="scripts", host_id=note.host_id
+        )
+        stored = deepcopy(note)
+        stored.name = stored.name.strip()
+        self._notes[stored.id] = stored
+        self.save()
+        return deepcopy(stored)
+
+    def get_note(self, note_id: UUID) -> Note:
+        self._require_unlocked()
+        try:
+            return deepcopy(self._notes[note_id])
+        except KeyError as exc:
+            raise NotFoundError(f"note not found: {note_id}") from exc
+
+    def get_note_by_name(self, name: str, *, host_id: UUID | None = None) -> Note:
+        self._require_unlocked()
+        for note in self._notes.values():
+            if note.name == name and note.host_id == host_id:
+                return deepcopy(note)
+        raise NotFoundError(f"note not found: {name}")
+
+    def list_notes(
+        self,
+        *,
+        host_id: UUID | None = None,
+        only_templates: bool = False,
+    ) -> list[Note]:
+        self._require_unlocked()
+        items: Iterable[Note] = self._notes.values()
+        if only_templates:
+            items = [n for n in items if n.host_id is None]
+        elif host_id is not None:
+            items = [n for n in items if n.host_id == host_id]
+        return [deepcopy(n) for n in items]
+
+    def update_note(self, note: Note) -> Note:
+        self._require_unlocked()
+        if note.id not in self._notes:
+            raise NotFoundError(f"note not found: {note.id}")
+        if note.host_id is not None and note.host_id not in self._hosts:
+            raise ValidationError(f"unknown host_id: {note.host_id}")
+        if not (note.name or "").strip():
+            raise ValidationError("note name must not be empty")
+        if self._note_name_taken(
+            note.name, host_id=note.host_id, exclude_id=note.id
+        ):
+            raise ValidationError(f"note name already exists: {note.name}")
+        self._validate_group_ref(
+            note.group_id, kind="scripts", host_id=note.host_id
+        )
+        stored = replace(deepcopy(note), name=note.name.strip(), updated_at=_utcnow())
+        self._notes[stored.id] = stored
+        self.save()
+        return deepcopy(stored)
+
+    def delete_note(self, note_id: UUID) -> None:
+        self._require_unlocked()
+        if note_id not in self._notes:
+            raise NotFoundError(f"note not found: {note_id}")
+        del self._notes[note_id]
+        self.save()
+
     # --- Group ---
 
     def _validate_group_entity(self, group: Group) -> None:
@@ -597,26 +699,55 @@ class Vault:
         self.save()
         return deepcopy(stored)
 
-    def delete_group(self, group_id: UUID) -> None:
-        """Delete group; children move to its parent (or root)."""
+    def descendant_group_ids(self, group_id: UUID) -> set[UUID]:
+        """group_id plus all nested child groups (same kind/host scope)."""
         self._require_unlocked()
-        group = self._groups.get(group_id)
-        if group is None:
+        if group_id not in self._groups:
             raise NotFoundError(f"group not found: {group_id}")
-        new_parent = group.parent_id
-        for child in self._groups.values():
-            if child.parent_id == group_id:
-                child.parent_id = new_parent
-                child.updated_at = _utcnow()
-        if group.kind == "hosts":
-            for host in self._hosts.values():
-                if host.group_id == group_id:
-                    host.group_id = new_parent
-                    host.updated_at = _utcnow()
-        else:
-            for script in self._scripts.values():
-                if script.group_id == group_id:
-                    script.group_id = new_parent
-                    script.updated_at = _utcnow()
-        del self._groups[group_id]
+        result: set[UUID] = {group_id}
+        changed = True
+        while changed:
+            changed = False
+            for g in self._groups.values():
+                if g.parent_id in result and g.id not in result:
+                    result.add(g.id)
+                    changed = True
+        return result
+
+    def group_content_counts(self, group_id: UUID) -> dict[str, int]:
+        """Counts for delete confirmation (includes nested groups)."""
+        ids = self.descendant_group_ids(group_id)
+        hosts = sum(1 for h in self._hosts.values() if h.group_id in ids)
+        scripts = sum(1 for s in self._scripts.values() if s.group_id in ids)
+        notes = sum(1 for n in self._notes.values() if n.group_id in ids)
+        subgroups = len(ids) - 1
+        return {
+            "groups": subgroups,
+            "hosts": hosts,
+            "scripts": scripts,
+            "notes": notes,
+        }
+
+    def delete_group(self, group_id: UUID) -> None:
+        """Recursively delete group and all nested content (hosts/scripts/notes/groups)."""
+        self._require_unlocked()
+        if group_id not in self._groups:
+            raise NotFoundError(f"group not found: {group_id}")
+        ids = self.descendant_group_ids(group_id)
+        host_ids = [h.id for h in self._hosts.values() if h.group_id in ids]
+        for hid in host_ids:
+            # Cascades addresses/credentials/host scripts/notes/host groups.
+            if hid in self._hosts:
+                self.delete_host(hid)
+        # Template / remaining scripts & notes in these groups (not host-cascaded).
+        for sid in [s.id for s in self._scripts.values() if s.group_id in ids]:
+            if sid in self._scripts:
+                del self._scripts[sid]
+        for nid in [n.id for n in self._notes.values() if n.group_id in ids]:
+            if nid in self._notes:
+                del self._notes[nid]
+        # Nested host-local groups may already be gone via delete_host.
+        for gid in list(ids):
+            if gid in self._groups:
+                del self._groups[gid]
         self.save()

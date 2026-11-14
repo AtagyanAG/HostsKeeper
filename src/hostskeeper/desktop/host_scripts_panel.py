@@ -18,9 +18,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hostskeeper.desktop.dialogs import ScriptDialog
+from hostskeeper.desktop.dialogs import NoteDialog, ScriptDialog
 from hostskeeper.desktop.drop_tree import DropTreeWidget
-from hostskeeper.desktop.folder_icon import apply_group_folder_icons
+from hostskeeper.desktop.folder_icon import (
+    apply_group_folder_icons,
+    folder_icon,
+    note_icon,
+    script_icon,
+)
 from hostskeeper.vault import Group, Script
 from hostskeeper.vault.errors import NotFoundError
 from hostskeeper.vault.store import Vault
@@ -66,12 +71,14 @@ class HostScriptsPanel(QWidget):
         # Modal dialog: no cross-window DnD from main Scripts tree.
 
         btn_row = QHBoxLayout()
-        self._btn_add = QPushButton("Add")
+        self._btn_add = QPushButton("Add Script")
+        self._btn_note = QPushButton("Add Note")
         self._btn_group = QPushButton("New group")
         self._btn_edit = QPushButton("Edit")
         self._btn_run = QPushButton("Run")
         self._btn_del = QPushButton("Delete")
         self._btn_add.clicked.connect(self._add_script)
+        self._btn_note.clicked.connect(self._add_note)
         self._btn_group.clicked.connect(self._add_group)
         self._btn_edit.clicked.connect(self._edit_selected)
         self._btn_run.clicked.connect(self._run_selected)
@@ -79,6 +86,7 @@ class HostScriptsPanel(QWidget):
         for b in (
             self._btn_group,
             self._btn_add,
+            self._btn_note,
             self._btn_edit,
             self._btn_del,
             self._btn_run,
@@ -122,17 +130,20 @@ class HostScriptsPanel(QWidget):
 
     def _set_actions_enabled(self, enabled: bool) -> None:
         self._btn_add.setEnabled(enabled)
+        self._btn_note.setEnabled(enabled)
         self._btn_group.setEnabled(enabled)
         self._tree.setEnabled(enabled)
         self._sync_selection_actions()
 
     def _sync_selection_actions(self) -> None:
-        """Edit/Run for scripts; Delete for script or group."""
+        """Edit/Run for scripts; Edit for notes/groups; Delete for any leaf/group."""
         payload = self._selected_payload() if self._enabled else None
-        on_script = bool(payload and payload.get("kind") == "script")
-        on_group = bool(payload and payload.get("kind") == "group")
-        self._btn_edit.setEnabled(on_script)
-        self._btn_del.setEnabled(on_script or on_group)
+        kind = payload.get("kind") if payload else None
+        on_script = kind == "script"
+        on_note = kind == "note"
+        on_group = kind == "group"
+        self._btn_edit.setEnabled(on_script or on_note or on_group)
+        self._btn_del.setEnabled(on_script or on_note or on_group)
         self._btn_run.setEnabled(on_script and self._on_run is not None)
 
     def refresh(self) -> None:
@@ -190,6 +201,7 @@ class HostScriptsPanel(QWidget):
             self._vault.list_scripts(host_id=host_id), key=lambda s: s.name.lower()
         ):
             item = QTreeWidgetItem([script.name])
+            item.setIcon(0, script_icon())
             item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -209,6 +221,32 @@ class HostScriptsPanel(QWidget):
                 group_items[script.group_id].addChild(item)
             else:
                 self._tree.addTopLevelItem(item)
+
+        for note in sorted(
+            self._vault.list_notes(host_id=host_id), key=lambda n: n.name.lower()
+        ):
+            item = QTreeWidgetItem([note.name])
+            item.setIcon(0, note_icon(mcp_enabled=note.mcp_enabled))
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "kind": "note",
+                    "id": note.id,
+                    "host_id": str(host_id),
+                    "group_id": str(note.group_id) if note.group_id else None,
+                },
+            )
+            item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsDragEnabled
+            )
+            if note.group_id and note.group_id in group_items:
+                group_items[note.group_id].addChild(item)
+            else:
+                self._tree.addTopLevelItem(item)
+
         for i in range(self._tree.topLevelItemCount()):
             top = self._tree.topLevelItem(i)
             if top is not None:
@@ -293,6 +331,18 @@ class HostScriptsPanel(QWidget):
         if dlg.exec() == ScriptDialog.DialogCode.Accepted:
             self.refresh()
 
+    def _add_note(self) -> None:
+        if self._host_id is None:
+            return
+        dlg = NoteDialog(
+            self._vault,
+            parent=self,
+            group_id=self._target_group_id(),
+            host_id=self._host_id,
+        )
+        if dlg.exec() == NoteDialog.DialogCode.Accepted:
+            self.refresh()
+
     def _add_group(self) -> None:
         if self._host_id is None:
             return
@@ -325,6 +375,14 @@ class HostScriptsPanel(QWidget):
                 return
             dlg = ScriptDialog(self._vault, script=script, parent=self)
             if dlg.exec() == ScriptDialog.DialogCode.Accepted:
+                self.refresh()
+        elif payload.get("kind") == "note":
+            try:
+                note = self._vault.get_note(UUID(str(payload["id"])))
+            except (NotFoundError, ValueError):
+                return
+            dlg = NoteDialog(self._vault, note=note, parent=self)
+            if dlg.exec() == NoteDialog.DialogCode.Accepted:
                 self.refresh()
         elif payload.get("kind") == "group":
             try:
@@ -359,13 +417,22 @@ class HostScriptsPanel(QWidget):
         if payload is None:
             return
         kind = payload.get("kind")
-        label = "script" if kind == "script" else "group"
-        if (
-            QMessageBox.question(
-                self,
-                "Delete",
-                f"Delete this {label}?",
+        if kind == "group":
+            try:
+                counts = self._vault.group_content_counts(UUID(str(payload["id"])))
+            except (NotFoundError, ValueError):
+                return
+            msg = (
+                "Delete this group and all contents?\n\n"
+                f"{counts['groups']} subgroup(s), {counts['scripts']} script(s), "
+                f"{counts['notes']} note(s)."
             )
+        elif kind == "note":
+            msg = "Delete this note?"
+        else:
+            msg = "Delete this script?"
+        if (
+            QMessageBox.question(self, "Delete", msg)
             != QMessageBox.StandardButton.Yes
         ):
             return
@@ -373,6 +440,8 @@ class HostScriptsPanel(QWidget):
             eid = UUID(str(payload["id"]))
             if kind == "script":
                 self._vault.delete_script(eid)
+            elif kind == "note":
+                self._vault.delete_note(eid)
             elif kind == "group":
                 self._vault.delete_group(eid)
         except Exception as exc:  # noqa: BLE001
@@ -389,10 +458,15 @@ class HostScriptsPanel(QWidget):
         menu = QMenu(self)
         payload = self._selected_payload()
         on_script = payload is not None and payload.get("kind") == "script"
-        menu.addAction("New group", self._add_group)
-        menu.addSeparator()
-        menu.addAction("Add", self._add_script)
+        new_menu = menu.addMenu("New")
+        act_group = new_menu.addAction(folder_icon(filled=False), "Group")
+        act_group.triggered.connect(self._add_group)
+        act_script = new_menu.addAction(script_icon(), "Script")
+        act_script.triggered.connect(self._add_script)
+        act_note = new_menu.addAction(note_icon(), "Note")
+        act_note.triggered.connect(self._add_note)
         if payload:
+            menu.addSeparator()
             menu.addAction("Edit", self._edit_selected)
             if on_script:
                 menu.addAction("Copy", self._copy_selected)
@@ -425,13 +499,17 @@ class HostScriptsPanel(QWidget):
             if isinstance(dst, dict):
                 if dst.get("kind") == "group":
                     new_parent = UUID(str(dst["id"]))
-                elif dst.get("kind") == "script" and dst.get("group_id"):
+                elif dst.get("kind") in ("script", "note") and dst.get("group_id"):
                     new_parent = UUID(str(dst["group_id"]))
         try:
             if src.get("kind") == "script":
                 script = self._vault.get_script(UUID(str(src["id"])))
                 script.group_id = new_parent
                 self._vault.update_script(script)
+            elif src.get("kind") == "note":
+                note = self._vault.get_note(UUID(str(src["id"])))
+                note.group_id = new_parent
+                self._vault.update_note(note)
             elif src.get("kind") == "group":
                 group = self._vault.get_group(UUID(str(src["id"])))
                 if new_parent == group.id:

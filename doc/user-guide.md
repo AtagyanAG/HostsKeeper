@@ -22,6 +22,7 @@ python -m hostskeeper
 
 1. Создайте Host → Address → Credential (ключ/пароль) через ПКМ в дереве.
    Во вкладке **Notes** — Markdown-профиль хоста (ОС, пакеты, runtimes) для ИИ; переключатель **Preview** включает просмотр.
+   В дереве **Scripts** (и Scripts хоста): листья **Script** и **Note** (Markdown-заметка, ПКМ New Note). У Note чекбокс **MCP** — доступ через `notes_*` без Approve.
 2. Выберите их → **+** на панели вкладок.
 3. Включите **MCP** на вкладке. Один раз: **Options → Copy MCP config** → вставьте в Cursor `mcp.json`
    (`http://<ip>:8765/mcp?key=...`). Дальше ИИ: `session_list` → `session_attach(alias=…)`.

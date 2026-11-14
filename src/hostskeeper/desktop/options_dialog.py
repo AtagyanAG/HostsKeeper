@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from hostskeeper.desktop.theme import THEME_CHOICES, normalize_theme
 from hostskeeper.runtime.settings import AppSettings, settings_path
 
 
@@ -53,6 +55,13 @@ class OptionsDialog(QDialog):
         self._tab_timeout.setToolTip(
             "Abort Tab SSH connect if the server does not answer in time (default 3 s)."
         )
+        self._theme = QComboBox()
+        self._theme.addItem("System", "system")
+        self._theme.addItem("Light", "light")
+        self._theme.addItem("Dark", "dark")
+        idx = self._theme.findData(normalize_theme(settings.ui_theme))
+        self._theme.setCurrentIndex(idx if idx >= 0 else 0)
+        self._theme.setToolTip("Application color theme (applied immediately on OK).")
 
         settings_row = QHBoxLayout()
         settings_row.addWidget(self._settings_file, stretch=1)
@@ -85,6 +94,7 @@ class OptionsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Settings", settings_row)
+        form.addRow("Theme", self._theme)
         form.addRow("PuTTY", putty_row)
         form.addRow("WinSCP", winscp_row)
         form.addRow("Tab connect timeout", self._tab_timeout)
@@ -188,5 +198,9 @@ class OptionsDialog(QDialog):
         self._settings.putty_path = putty
         self._settings.winscp_path = winscp
         self._settings.tab_connect_timeout_sec = int(self._tab_timeout.value())
+        theme = self._theme.currentData()
+        self._settings.ui_theme = (
+            theme if theme in THEME_CHOICES else "system"
+        )
         self._settings.save()
         self.accept()

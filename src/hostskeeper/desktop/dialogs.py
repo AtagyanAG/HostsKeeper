@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -47,7 +48,7 @@ from hostskeeper.session.knock import (
     format_knock_sequence,
     parse_knock_sequence,
 )
-from hostskeeper.vault import Address, Credential, Host, Script, ScriptParameter
+from hostskeeper.vault import Address, Credential, Host, Note, Script, ScriptParameter
 from hostskeeper.vault.errors import NotFoundError
 from hostskeeper.vault.models import (
     AUTH_KEY_PAIR,
@@ -64,6 +65,24 @@ def _tags_from_text(text: str) -> list[str]:
 
 def _tags_to_text(tags: list[str]) -> str:
     return ", ".join(tags)
+
+
+def _format_ts(dt: datetime | None) -> str:
+    if dt is None:
+        return "—"
+    local = dt.astimezone() if dt.tzinfo is not None else dt
+    return local.strftime("%d.%m.%Y %H:%M")
+
+
+def _timestamps_label(
+    created_at: datetime | None, updated_at: datetime | None
+) -> QLabel:
+    """One-line read-only Created / Modified (dd.mm.yyyy HH:MM)."""
+    lab = QLabel(
+        f"Created: {_format_ts(created_at)}    Modified: {_format_ts(updated_at)}"
+    )
+    lab.setStyleSheet("color: #666;")
+    return lab
 
 
 ConnectTarget = Callable[[UUID, UUID, UUID], None]
@@ -214,6 +233,13 @@ class HostDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
+        # Timestamps above tabs (Host dialog chrome).
+        layout.addWidget(
+            _timestamps_label(
+                host.created_at if host is not None else None,
+                host.updated_at if host is not None else None,
+            )
+        )
         layout.addWidget(tabs)
         layout.addSpacing(8)
         layout.addWidget(buttons)
@@ -1218,6 +1244,12 @@ class ScriptDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
+        layout.addWidget(
+            _timestamps_label(
+                script.created_at if script is not None else None,
+                script.updated_at if script is not None else None,
+            )
+        )
         layout.addLayout(form)
         layout.addWidget(splitter, stretch=1)
         layout.addWidget(buttons)
@@ -1272,6 +1304,123 @@ class ScriptDialog(QDialog):
                 s.tags = _tags_from_text(self._tags.text())
                 s.parameters = params
                 self._vault.update_script(s)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "HostsKeeper", str(exc))
+            return
+        self.accept()
+
+
+class NoteDialog(QDialog):
+    """Markdown Note editor with Preview and MCP checkbox."""
+
+    def __init__(
+        self,
+        vault: Vault,
+        note: Note | None = None,
+        parent=None,
+        *,
+        group_id: UUID | None = None,
+        host_id: UUID | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._vault = vault
+        self._note = note
+        self._group_id = note.group_id if note is not None else group_id
+        self._host_id = note.host_id if note is not None else host_id
+        self.setWindowTitle("Edit Note" if note is not None else "New Note")
+
+        self._name = QLineEdit(note.name if note is not None else "")
+        self._name.setPlaceholderText("Name")
+        self._mcp = QCheckBox("MCP")
+        self._mcp.setToolTip(
+            "When checked, this note is available via MCP notes_* tools (no Approve)."
+        )
+        self._mcp.setChecked(bool(note.mcp_enabled) if note is not None else False)
+
+        self._preview = QCheckBox("Preview")
+        self._preview.setToolTip("Toggle Markdown preview / edit")
+        self._preview.toggled.connect(self._on_preview_toggled)
+
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Name"))
+        top.addWidget(self._name, stretch=1)
+        top.addWidget(self._mcp)
+        top.addWidget(self._preview)
+
+        self._body = QPlainTextEdit()
+        self._body.setPlaceholderText("Markdown note…")
+        self._body.setPlainText(note.body if note is not None else "")
+        self._body_preview = QTextBrowser()
+        self._body_preview.setOpenExternalLinks(True)
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._body)
+        self._stack.addWidget(self._body_preview)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(
+            _timestamps_label(
+                note.created_at if note is not None else None,
+                note.updated_at if note is not None else None,
+            )
+        )
+        layout.addLayout(top)
+        layout.addWidget(self._stack, stretch=1)
+        layout.addWidget(buttons)
+        self.setMinimumSize(480, 360)
+        self._result: Note | None = None
+
+    def _on_preview_toggled(self, preview: bool) -> None:
+        if preview:
+            self._refresh_preview()
+            self._stack.setCurrentIndex(1)
+        else:
+            self._stack.setCurrentIndex(0)
+
+    def _refresh_preview(self) -> None:
+        import markdown
+
+        raw = self._body.toPlainText()
+        if not raw.strip():
+            self._body_preview.setHtml(
+                "<p style='color:#888'><i>Empty note</i></p>"
+            )
+            return
+        html = markdown.markdown(
+            raw,
+            extensions=["fenced_code", "tables", "nl2br", "sane_lists"],
+        )
+        self._body_preview.setHtml(html)
+
+    def _save(self) -> None:
+        name = self._name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Note", "Name is required.")
+            return
+        body = self._body.toPlainText()
+        mcp_enabled = self._mcp.isChecked()
+        try:
+            if self._note is None:
+                self._result = self._vault.add_note(
+                    Note(
+                        name=name,
+                        body=body,
+                        group_id=self._group_id,
+                        host_id=self._host_id,
+                        mcp_enabled=mcp_enabled,
+                    )
+                )
+            else:
+                n = self._note
+                n.name = name
+                n.body = body
+                n.mcp_enabled = mcp_enabled
+                self._result = self._vault.update_note(n)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "HostsKeeper", str(exc))
             return

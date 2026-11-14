@@ -206,21 +206,37 @@ def test_credential_repr_redacts_secrets() -> None:
     assert "user" in text
 
 
-def test_groups_host_move_and_delete(tmp_path: Path) -> None:
+def test_groups_host_recursive_delete(tmp_path: Path) -> None:
     path = tmp_path / "g.vault"
     vault = Vault.create(path, "pw")
     group = vault.add_group(Group(name="Lab", kind="hosts"))
-    host = vault.add_host(Host(name="h1", group_id=group.id))
-    assert host.group_id == group.id
-    vault.lock()
+    child = vault.add_group(Group(name="Nested", kind="hosts", parent_id=group.id))
+    host = vault.add_host(Host(name="h1", group_id=child.id))
+    assert host.group_id == child.id
+    counts = vault.group_content_counts(group.id)
+    assert counts["hosts"] == 1
+    assert counts["groups"] == 1
+    vault.delete_group(group.id)
+    assert vault.list_groups() == []
+    assert vault.list_hosts() == []
 
+
+def test_notes_crud_and_group_cascade(tmp_path: Path) -> None:
+    from hostskeeper.vault import Note
+
+    path = tmp_path / "notes.vault"
+    vault = Vault.create(path, "pw")
+    group = vault.add_group(Group(name="Docs", kind="scripts"))
+    note = vault.add_note(
+        Note(name="readme", body="# Hi", group_id=group.id, mcp_enabled=False)
+    )
+    assert note.name == "readme"
+    vault.lock()
     again = Vault(path)
     again.unlock("pw")
-    assert again.list_groups(kind="hosts")[0].name == "Lab"
-    h = again.get_host(host.id)
-    assert h.group_id == group.id
+    assert again.get_note(note.id).body == "# Hi"
     again.delete_group(group.id)
-    assert again.get_host(host.id).group_id is None
+    assert again.list_notes() == []
     assert again.list_groups() == []
 
 

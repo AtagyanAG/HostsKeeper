@@ -19,7 +19,7 @@ from hostskeeper.session.manager import (
 )
 from hostskeeper.session.models import SessionInfo, SessionStatus
 from hostskeeper.vault.errors import NotFoundError, ValidationError
-from hostskeeper.vault.models import Group, Host, Script, ScriptParameter
+from hostskeeper.vault.models import Group, Host, Note, Script, ScriptParameter
 from hostskeeper.vault.store import Vault
 
 
@@ -449,6 +449,128 @@ class McpToolService:
         self._notify_vault_changed()
         return {"ok": True, "id": str(script.id), "name": script.name}
 
+    def notes_list(self, access: McpAccess) -> dict[str, Any]:
+        self._assert_access(access)
+        visible_hosts = self._accessible_host_ids(access)
+        notes = []
+        for note in self._vault.list_notes():
+            if not note.mcp_enabled:
+                continue
+            if note.host_id is not None and note.host_id not in visible_hosts:
+                continue
+            notes.append(
+                {
+                    "id": str(note.id),
+                    "name": note.name,
+                    "host_id": str(note.host_id) if note.host_id else None,
+                    "group_id": str(note.group_id) if note.group_id else None,
+                    "mcp_enabled": True,
+                    "chars": len(note.body or ""),
+                }
+            )
+        return {"notes": notes}
+
+    def notes_get(
+        self,
+        access: McpAccess,
+        *,
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._assert_access(access)
+        note = self._find_note(access, id=id, name=name, host_id=host_id)
+        return note.to_mcp_dict()
+
+    def notes_create(
+        self,
+        access: McpAccess,
+        *,
+        name: str,
+        body: str = "",
+        host_id: str | None = None,
+        group_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create note; mcp_enabled always True (model cannot set the flag)."""
+        self._assert_access(access)
+        resolved_host: UUID | None = None
+        if host_id:
+            try:
+                resolved_host = UUID(host_id)
+            except ValueError as exc:
+                raise McpToolError("invalid_args", "invalid host_id") from exc
+            if resolved_host not in self._accessible_host_ids(access):
+                raise McpToolError(
+                    "client_scope",
+                    "host notes require an open MCP tab on that host",
+                )
+        resolved_group: UUID | None = None
+        if group_id:
+            try:
+                resolved_group = UUID(group_id)
+            except ValueError as exc:
+                raise McpToolError("invalid_args", "invalid group_id") from exc
+        note = Note(
+            name=name,
+            body=body or "",
+            host_id=resolved_host,
+            group_id=resolved_group,
+            mcp_enabled=True,
+        )
+        try:
+            stored = self._vault.add_note(note)
+        except ValidationError as exc:
+            raise McpToolError("invalid_args", str(exc)) from exc
+        self._notify_vault_changed()
+        return stored.to_mcp_dict()
+
+    def notes_update(
+        self,
+        access: McpAccess,
+        *,
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+        body: str | None = None,
+        new_name: str | None = None,
+        group_id: object = _UNSET,
+    ) -> dict[str, Any]:
+        """Update note body/name/group; mcp_enabled is not changed via MCP."""
+        self._assert_access(access)
+        note = self._find_note(access, id=id, name=name, host_id=host_id)
+        if body is not None:
+            note.body = body
+        if new_name is not None:
+            note.name = new_name
+        if group_id is not _UNSET:
+            if group_id is None or group_id == "":
+                note.group_id = None
+            else:
+                try:
+                    note.group_id = UUID(str(group_id))
+                except ValueError as exc:
+                    raise McpToolError("invalid_args", "invalid group_id") from exc
+        try:
+            stored = self._vault.update_note(note)
+        except (ValidationError, ValueError) as exc:
+            raise McpToolError("invalid_args", str(exc)) from exc
+        self._notify_vault_changed()
+        return stored.to_mcp_dict()
+
+    def notes_delete(
+        self,
+        access: McpAccess,
+        *,
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._assert_access(access)
+        note = self._find_note(access, id=id, name=name, host_id=host_id)
+        self._vault.delete_note(note.id)
+        self._notify_vault_changed()
+        return {"ok": True, "id": str(note.id), "name": note.name}
+
     def scripts_run(
         self,
         access: McpAccess,
@@ -583,11 +705,18 @@ class McpToolService:
         return stored.to_mcp_dict()
 
     def groups_delete(self, access: McpAccess, *, id: str) -> dict[str, Any]:
+        """Delete group and all nested content (hosts/scripts/notes/groups)."""
         self._assert_access(access)
         group = self._require_group_access(access, id)
+        counts = self._vault.group_content_counts(group.id)
         self._vault.delete_group(group.id)
         self._notify_vault_changed()
-        return {"ok": True, "id": str(group.id), "name": group.name}
+        return {
+            "ok": True,
+            "id": str(group.id),
+            "name": group.name,
+            "deleted": counts,
+        }
 
     def _assert_access(self, access: McpAccess) -> None:
         # stdio trusted; HTTP must have valid token or gateway key.
@@ -648,6 +777,58 @@ class McpToolService:
         ):
             raise McpToolError("not_found", "group not found")
         return group
+
+    def _find_note(
+        self,
+        access: McpAccess,
+        *,
+        id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+    ) -> Note:
+        visible_hosts = self._accessible_host_ids(access)
+        if id:
+            try:
+                note = self._vault.get_note(UUID(id))
+            except (ValueError, NotFoundError) as exc:
+                raise McpToolError("not_found", "note not found") from exc
+            if not note.mcp_enabled:
+                raise McpToolError("not_found", "note not found")
+            if note.host_id is not None and note.host_id not in visible_hosts:
+                raise McpToolError(
+                    "client_scope",
+                    "host notes require an open MCP tab on that host",
+                )
+            return note
+        if name:
+            resolved_host: UUID | None = None
+            if host_id:
+                try:
+                    resolved_host = UUID(host_id)
+                except ValueError as exc:
+                    raise McpToolError("invalid_args", "invalid host_id") from exc
+            matches = [
+                n
+                for n in self._vault.list_notes()
+                if n.mcp_enabled
+                and n.name == name
+                and (n.host_id is None or n.host_id in visible_hosts)
+            ]
+            if host_id is not None:
+                matches = [n for n in matches if n.host_id == resolved_host]
+            else:
+                templates = [n for n in matches if n.host_id is None]
+                if templates:
+                    matches = templates
+            if len(matches) == 1:
+                return matches[0]
+            if not matches:
+                raise McpToolError("not_found", "note not found")
+            raise McpToolError(
+                "invalid_args",
+                "ambiguous note name; pass id or host_id",
+            )
+        raise McpToolError("invalid_args", "id or name required")
 
     def _find_script(
         self,

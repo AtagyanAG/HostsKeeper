@@ -354,6 +354,50 @@ class ScriptParameter:
 
 
 @dataclass
+class Note:
+    """Markdown note leaf in Scripts trees (global or host-local)."""
+
+    name: str
+    body: str = ""
+    id: UUID = field(default_factory=_new_id)
+    group_id: UUID | None = None
+    # None = template (global Scripts tree); set = host-local note.
+    host_id: UUID | None = None
+    # When True, note is visible/editable via MCP notes_* (no Approve).
+    mcp_enabled: bool = False
+    created_at: datetime = field(default_factory=_utcnow)
+    updated_at: datetime = field(default_factory=_utcnow)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "body": self.body,
+            "group_id": str(self.group_id) if self.group_id else None,
+            "host_id": str(self.host_id) if self.host_id else None,
+            "mcp_enabled": bool(self.mcp_enabled),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    def to_mcp_dict(self) -> dict[str, Any]:
+        return self.to_dict()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Note:
+        return cls(
+            id=UUID(data["id"]),
+            name=data["name"],
+            body=data.get("body") or "",
+            group_id=UUID(data["group_id"]) if data.get("group_id") else None,
+            host_id=UUID(data["host_id"]) if data.get("host_id") else None,
+            mcp_enabled=bool(data.get("mcp_enabled", False)),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+        )
+
+
+@dataclass
 class Script:
     name: str
     body: str
