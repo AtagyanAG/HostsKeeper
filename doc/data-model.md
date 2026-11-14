@@ -30,6 +30,7 @@ Session (runtime, не в vault):
 | name | string | Отображаемое имя |
 | description | string? | Короткое описание (вкладка Host) |
 | profile | string? | Notes: свободный текст о хосте (ОС, пакеты, runtimes…); вкладка Notes |
+| notes_preview | bool | UI: Preview на вкладке Notes (default false); в MCP не отдаётся |
 | tags | string[] | Теги |
 | default_address_id | UUID? | Адрес по умолчанию |
 | default_credential_id | UUID? | Учётка по умолчанию |
@@ -119,6 +120,7 @@ Markdown-лист в деревьях Scripts (не путать с Host → Not
 | group_id | UUID? | Та же папка scripts, что у Script |
 | host_id | UUID? | `null` = шаблон; иначе заметка хоста |
 | mcp_enabled | bool | UI-чекбокс; default false (человек); create через MCP всегда true |
+| preview | bool | UI: Markdown Preview (default false); в MCP не отдаётся |
 | created_at / updated_at | datetime | |
 
 MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-local при открытой MCP-вкладке). Approve не требуется. `notes_update` не меняет `mcp_enabled`.

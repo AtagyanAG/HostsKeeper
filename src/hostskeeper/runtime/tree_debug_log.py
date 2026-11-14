@@ -1,24 +1,26 @@
-"""Append-only debug log for tree expand/collapse (crash hunting).
+"""Per-process debug log for tree expand/collapse (crash hunting).
 
-Log file: ``hostskeeper-tree.log`` in the application launch directory
-(frozen: next to the exe; otherwise process cwd). Every line is flushed.
-``faulthandler`` is also enabled on the same file for native crashes.
+Log file: ``hostskeeper-tree-<pid>.log`` in the application launch directory
+(frozen: next to the exe; otherwise process cwd). Each process starts a fresh
+file. On clean shutdown the file is closed and deleted (crash leaves it for
+inspection). ``faulthandler`` is enabled on the same file for native crashes.
 """
 
 from __future__ import annotations
 
 import faulthandler
+import os
 import sys
 import threading
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-_LOG_NAME = "hostskeeper-tree.log"
 _fp = None
 _lock = threading.Lock()
 _faulthandler_on = False
 _session_logged = False
+_removed = False
 
 
 def launch_dir() -> Path:
@@ -28,7 +30,7 @@ def launch_dir() -> Path:
 
 
 def log_path() -> Path:
-    return launch_dir() / _LOG_NAME
+    return launch_dir() / f"hostskeeper-tree-{os.getpid()}.log"
 
 
 def _write_line_unlocked(line: str) -> None:
@@ -41,11 +43,14 @@ def _write_line_unlocked(line: str) -> None:
 
 def _ensure_open_unlocked() -> None:
     global _fp, _faulthandler_on, _session_logged
+    if _removed:
+        return
     if _fp is not None and not _fp.closed:
         return
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _fp = path.open("a", encoding="utf-8", buffering=1)  # line-buffered
+    # New process → new log (truncate if a leftover same-pid file exists).
+    _fp = path.open("w", encoding="utf-8", buffering=1)
     if not _faulthandler_on:
         try:
             faulthandler.enable(file=_fp, all_threads=True)
@@ -58,8 +63,8 @@ def _ensure_open_unlocked() -> None:
         tid = threading.current_thread().name
         _write_line_unlocked(
             f"{ts} {tid} session tree debug log opened "
-            f"path={path} cwd={Path.cwd()} argv0={sys.argv[0]!r} "
-            f"frozen={getattr(sys, 'frozen', False)}"
+            f"path={path} pid={os.getpid()} cwd={Path.cwd()} "
+            f"argv0={sys.argv[0]!r} frozen={getattr(sys, 'frozen', False)}"
         )
 
 
@@ -68,6 +73,8 @@ def log(event: str, message: str = "", **fields: object) -> None:
     try:
         with _lock:
             _ensure_open_unlocked()
+            if _fp is None or _fp.closed:
+                return
             ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             tid = threading.current_thread().name
             extra = " ".join(f"{k}={v!r}" for k, v in fields.items())
@@ -90,3 +97,32 @@ def log_exception(event: str, exc: BaseException, **fields: object) -> None:
         ).replace("\n", " | "),
         **fields,
     )
+
+
+def close_and_remove() -> None:
+    """Clean shutdown: disable faulthandler, close and delete this process log."""
+    global _fp, _faulthandler_on, _removed
+    try:
+        with _lock:
+            path = log_path()
+            if _faulthandler_on:
+                try:
+                    faulthandler.disable()
+                except Exception:  # noqa: BLE001
+                    pass
+                _faulthandler_on = False
+            if _fp is not None and not _fp.closed:
+                try:
+                    _fp.flush()
+                    _fp.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            _fp = None
+            _removed = True
+            try:
+                if path.is_file():
+                    path.unlink()
+            except OSError:
+                pass
+    except Exception:  # noqa: BLE001
+        return

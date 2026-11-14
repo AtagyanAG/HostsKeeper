@@ -69,6 +69,8 @@ class Host:
     description: str | None = None
     # Free-form host Notes (OS, packages, runtimes, …) — Edit Host → Notes tab.
     profile: str | None = None
+    # UI: Markdown Preview checkbox on Host → Notes (default off).
+    notes_preview: bool = False
     tags: list[str] = field(default_factory=list)
     default_address_id: UUID | None = None
     default_credential_id: UUID | None = None
@@ -82,6 +84,7 @@ class Host:
             "name": self.name,
             "description": self.description,
             "profile": self.profile,
+            "notes_preview": bool(self.notes_preview),
             "tags": list(self.tags),
             "default_address_id": str(self.default_address_id)
             if self.default_address_id
@@ -101,6 +104,7 @@ class Host:
             name=data["name"],
             description=data.get("description"),
             profile=data.get("profile"),
+            notes_preview=bool(data.get("notes_preview", False)),
             tags=list(data.get("tags") or []),
             default_address_id=UUID(data["default_address_id"])
             if data.get("default_address_id")
@@ -365,6 +369,8 @@ class Note:
     host_id: UUID | None = None
     # When True, note is visible/editable via MCP notes_* (no Approve).
     mcp_enabled: bool = False
+    # UI: Markdown Preview checkbox (default off). Not exposed via MCP.
+    preview: bool = False
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
 
@@ -376,12 +382,15 @@ class Note:
             "group_id": str(self.group_id) if self.group_id else None,
             "host_id": str(self.host_id) if self.host_id else None,
             "mcp_enabled": bool(self.mcp_enabled),
+            "preview": bool(self.preview),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
 
     def to_mcp_dict(self) -> dict[str, Any]:
-        return self.to_dict()
+        data = self.to_dict()
+        data.pop("preview", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Note:
@@ -392,6 +401,7 @@ class Note:
             group_id=UUID(data["group_id"]) if data.get("group_id") else None,
             host_id=UUID(data["host_id"]) if data.get("host_id") else None,
             mcp_enabled=bool(data.get("mcp_enabled", False)),
+            preview=bool(data.get("preview", False)),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
         )

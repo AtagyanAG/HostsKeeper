@@ -220,6 +220,14 @@ class HostDialog(QDialog):
         self._notes_stack.addWidget(self._profile)  # 0 = edit
         self._notes_stack.addWidget(self._profile_preview)  # 1 = preview
         notes_layout.addWidget(self._notes_stack)
+        # Restore per-host Preview (New Host stays off until OK).
+        preview_on = bool(host.notes_preview) if host is not None else False
+        self._notes_preview.blockSignals(True)
+        self._notes_preview.setChecked(preview_on)
+        self._notes_preview.blockSignals(False)
+        if preview_on:
+            self._refresh_notes_preview()
+            self._notes_stack.setCurrentIndex(1)
 
         tabs = QTabWidget()
         tabs.addTab(host_page, "Host")
@@ -454,6 +462,7 @@ class HostDialog(QDialog):
                     name=name,
                     description=self._description.text().strip() or None,
                     profile=self._profile.toPlainText().strip() or None,
+                    notes_preview=self._notes_preview.isChecked(),
                     tags=_tags_from_text(self._tags.text()),
                     group_id=self._group_id,
                 )
@@ -462,6 +471,7 @@ class HostDialog(QDialog):
         h.name = name
         h.description = self._description.text().strip() or None
         h.profile = self._profile.toPlainText().strip() or None
+        h.notes_preview = self._notes_preview.isChecked()
         h.tags = _tags_from_text(self._tags.text())
         h.default_address_id = self._selected_uuid(self._default_addr)
         h.default_credential_id = self._selected_uuid(self._default_cred)
@@ -1355,6 +1365,13 @@ class NoteDialog(QDialog):
         self._stack = QStackedWidget()
         self._stack.addWidget(self._body)
         self._stack.addWidget(self._body_preview)
+        preview_on = bool(note.preview) if note is not None else False
+        self._preview.blockSignals(True)
+        self._preview.setChecked(preview_on)
+        self._preview.blockSignals(False)
+        if preview_on:
+            self._refresh_preview()
+            self._stack.setCurrentIndex(1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -1405,6 +1422,7 @@ class NoteDialog(QDialog):
         body = self._body.toPlainText()
         mcp_enabled = self._mcp.isChecked()
         try:
+            preview = self._preview.isChecked()
             if self._note is None:
                 self._result = self._vault.add_note(
                     Note(
@@ -1413,6 +1431,7 @@ class NoteDialog(QDialog):
                         group_id=self._group_id,
                         host_id=self._host_id,
                         mcp_enabled=mcp_enabled,
+                        preview=preview,
                     )
                 )
             else:
@@ -1420,6 +1439,7 @@ class NoteDialog(QDialog):
                 n.name = name
                 n.body = body
                 n.mcp_enabled = mcp_enabled
+                n.preview = preview
                 self._result = self._vault.update_note(n)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "HostsKeeper", str(exc))

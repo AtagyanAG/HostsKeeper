@@ -228,16 +228,36 @@ def test_notes_crud_and_group_cascade(tmp_path: Path) -> None:
     vault = Vault.create(path, "pw")
     group = vault.add_group(Group(name="Docs", kind="scripts"))
     note = vault.add_note(
-        Note(name="readme", body="# Hi", group_id=group.id, mcp_enabled=False)
+        Note(
+            name="readme",
+            body="# Hi",
+            group_id=group.id,
+            mcp_enabled=False,
+            preview=True,
+        )
     )
     assert note.name == "readme"
+    assert note.preview is True
+    assert "preview" not in note.to_mcp_dict()
     vault.lock()
     again = Vault(path)
     again.unlock("pw")
     assert again.get_note(note.id).body == "# Hi"
+    assert again.get_note(note.id).preview is True
     again.delete_group(group.id)
     assert again.list_notes() == []
     assert again.list_groups() == []
+
+
+def test_host_notes_preview_persists(tmp_path: Path) -> None:
+    path = tmp_path / "hp.vault"
+    vault = Vault.create(path, "pw")
+    host = vault.add_host(Host(name="h1", notes_preview=True))
+    assert host.notes_preview is True
+    vault.lock()
+    again = Vault(path)
+    again.unlock("pw")
+    assert again.get_host(host.id).notes_preview is True
 
 
 def test_tree_expand_state_persists_in_vault(tmp_path: Path) -> None:

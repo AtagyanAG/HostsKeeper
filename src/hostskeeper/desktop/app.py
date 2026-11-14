@@ -68,6 +68,10 @@ def run_desktop(
         stop_mcp_http()
         if state.unlocked:
             state.lock()
+        from hostskeeper.runtime.tree_debug_log import close_and_remove
+
+        # Clean exit → remove per-pid tree debug log (crash leaves the file).
+        close_and_remove()
 
     app.aboutToQuit.connect(_on_quit)
 
