@@ -3,7 +3,7 @@
 Автопрогон ядра Tab+MCP: `python scripts/check_tab_mcp_live.py` (при заданном `HOSTSKEEPER_TEST_SSH_KEY`).
 
 - [x] `pip install -e ".[dev]"` и `pytest` — 24 passed
-- [x] `python -m hostskeeper --version` → `HostsKeeper 0.1.0`
+- [x] `python -m hostskeeper --version` → `HostsKeeper 0.1.1`
 - [x] Open Tab / echo / reconnect (headless = тот же SessionManager, что Qt) — `check_tab_mcp_live.py`
 - [x] Qt UI: Open Tab видно в вкладке, ввод с клавиатуры (ручной)
 - [x] MCP On → URL; `session_info` без IP/ключей — auto
