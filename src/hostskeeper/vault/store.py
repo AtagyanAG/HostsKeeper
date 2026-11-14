@@ -44,6 +44,11 @@ class Vault:
         self._credentials: dict[UUID, Credential] = {}
         self._scripts: dict[UUID, Script] = {}
         self._groups: dict[UUID, Group] = {}
+        # UI tree chrome (encrypted with vault). Roots default expanded.
+        self._ui_tree: dict[str, bool] = {
+            "hosts_root_expanded": True,
+            "scripts_root_expanded": True,
+        }
 
     @property
     def is_unlocked(self) -> bool:
@@ -90,6 +95,15 @@ class Vault:
             UUID(k): Group.from_dict(v)
             for k, v in (payload.get("groups") or {}).items()
         }
+        ui_raw = payload.get("ui_tree") or {}
+        self._ui_tree = {
+            "hosts_root_expanded": bool(
+                ui_raw.get("hosts_root_expanded", True)
+            ),
+            "scripts_root_expanded": bool(
+                ui_raw.get("scripts_root_expanded", True)
+            ),
+        }
         self._password = password
 
     def lock(self) -> None:
@@ -99,6 +113,10 @@ class Vault:
         self._credentials.clear()
         self._scripts.clear()
         self._groups.clear()
+        self._ui_tree = {
+            "hosts_root_expanded": True,
+            "scripts_root_expanded": True,
+        }
 
     def save(self) -> None:
         self._require_unlocked()
@@ -112,6 +130,14 @@ class Vault:
             },
             "scripts": {str(k): v.to_dict() for k, v in self._scripts.items()},
             "groups": {str(k): v.to_dict() for k, v in self._groups.items()},
+            "ui_tree": {
+                "hosts_root_expanded": bool(
+                    self._ui_tree.get("hosts_root_expanded", True)
+                ),
+                "scripts_root_expanded": bool(
+                    self._ui_tree.get("scripts_root_expanded", True)
+                ),
+            },
         }
         plaintext = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
             "utf-8"
@@ -426,12 +452,101 @@ class Vault:
             if parent.host_id != group.host_id:
                 raise ValidationError("parent group host_id mismatch")
 
+    def tree_root_expanded(self, root: str) -> bool:
+        """Expand state for workspace Hosts/Scripts roots (default True)."""
+        self._require_unlocked()
+        if root == "hosts":
+            return bool(self._ui_tree.get("hosts_root_expanded", True))
+        if root == "scripts":
+            return bool(self._ui_tree.get("scripts_root_expanded", True))
+        raise ValidationError(f"unknown tree root: {root}")
+
+    def set_tree_root_expanded(self, root: str, expanded: bool) -> None:
+        from hostskeeper.runtime.tree_debug_log import log, log_exception
+
+        self._require_unlocked()
+        if root == "hosts":
+            key = "hosts_root_expanded"
+        elif root == "scripts":
+            key = "scripts_root_expanded"
+        else:
+            raise ValidationError(f"unknown tree root: {root}")
+        prev = bool(self._ui_tree.get(key, True))
+        if prev == bool(expanded):
+            log("vault_root_expand_noop", root=root, expanded=expanded)
+            return
+        log(
+            "vault_root_expand_save_begin",
+            root=root,
+            expanded=expanded,
+            prev=prev,
+            path=str(self.path),
+        )
+        self._ui_tree[key] = bool(expanded)
+        try:
+            self.save()
+            log("vault_root_expand_save_ok", root=root, expanded=expanded)
+        except Exception as exc:  # noqa: BLE001
+            log_exception(
+                "vault_root_expand_save_fail",
+                exc,
+                root=root,
+                expanded=expanded,
+            )
+            raise
+
+    def set_group_expanded(self, group_id: UUID, expanded: bool) -> None:
+        """Persist group expand state without bumping updated_at."""
+        from hostskeeper.runtime.tree_debug_log import log, log_exception
+
+        self._require_unlocked()
+        group = self._groups.get(group_id)
+        if group is None:
+            raise NotFoundError(f"group not found: {group_id}")
+        prev = bool(group.expanded)
+        if prev == bool(expanded):
+            log(
+                "vault_group_expand_noop",
+                id=str(group_id),
+                name=group.name,
+                expanded=expanded,
+            )
+            return
+        log(
+            "vault_group_expand_save_begin",
+            id=str(group_id),
+            name=group.name,
+            expanded=expanded,
+            prev=prev,
+            path=str(self.path),
+        )
+        group.expanded = bool(expanded)
+        try:
+            self.save()
+            log(
+                "vault_group_expand_save_ok",
+                id=str(group_id),
+                name=group.name,
+                expanded=expanded,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_exception(
+                "vault_group_expand_save_fail",
+                exc,
+                id=str(group_id),
+                name=group.name,
+                expanded=expanded,
+            )
+            raise
+
     def add_group(self, group: Group) -> Group:
         self._require_unlocked()
         if group.id in self._groups:
             raise ValidationError(f"group already exists: {group.id}")
         self._validate_group_entity(group)
         stored = deepcopy(group)
+        # New groups default to expanded unless caller set otherwise.
+        stored.expanded = bool(getattr(stored, "expanded", True))
         self._groups[stored.id] = stored
         self.save()
         return deepcopy(stored)

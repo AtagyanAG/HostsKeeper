@@ -556,7 +556,7 @@ class McpToolService:
         except ValidationError as exc:
             raise McpToolError("invalid_args", str(exc)) from exc
         self._notify_vault_changed()
-        return stored.to_dict()
+        return stored.to_mcp_dict()
 
     def groups_update(
         self,
@@ -577,7 +577,7 @@ class McpToolService:
         except (ValidationError, ValueError) as exc:
             raise McpToolError("invalid_args", str(exc)) from exc
         self._notify_vault_changed()
-        return stored.to_dict()
+        return stored.to_mcp_dict()
 
     def groups_delete(self, access: McpAccess, *, id: str) -> dict[str, Any]:
         self._assert_access(access)

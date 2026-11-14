@@ -246,6 +246,7 @@ Update — по `id` или `name` (+ `host_id` при неоднозначно�
 ### groups_list / groups_create / groups_update / groups_delete
 
 Дерево групп (`kind=scripts|hosts`). Шаблонные scripts-группы всегда; host-группы — при открытой вкладке хоста.  
+Поле `expanded` (UI) в ответах **не** отдаётся.  
 Create: `name`, `kind?`, `parent_id?`, `host_id?`. Update/delete по `id`. Без approve.
 
 ## Ошибки (логический код)

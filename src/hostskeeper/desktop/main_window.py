@@ -105,6 +105,8 @@ class MainWindow(QMainWindow):
         self._open_worker: object | None = None
         self._shutting_down = False
         self._connect_busy = False
+        # Skip persist while rebuilding trees / programmatic expand.
+        self._suppress_expand_persist = False
         # Path of the vault that is actually unlocked (selection may differ).
         self._connected_vault_path: Path | None = None
         self.setWindowTitle("HostsKeeper")
@@ -202,6 +204,8 @@ class MainWindow(QMainWindow):
         self._vault_tree.itemDoubleClicked.connect(self._on_vault_double_click)
         self._vault_tree.itemActivated.connect(self._on_vault_activated)
         self._vault_tree.reparent_requested.connect(self._on_vault_reparent)
+        self._vault_tree.itemExpanded.connect(self._on_vault_item_expanded)
+        self._vault_tree.itemCollapsed.connect(self._on_vault_item_collapsed)
         vaults_layout.addWidget(self._vault_tree)
         left_split.addWidget(vaults_wrap)
 
@@ -221,6 +225,8 @@ class MainWindow(QMainWindow):
         self._tree.itemSelectionChanged.connect(self._on_tree_selection)
         self._tree.reparent_requested.connect(self._on_workspace_reparent)
         self._tree.foreign_drop_requested.connect(self._on_workspace_foreign_drop)
+        self._tree.itemExpanded.connect(self._on_workspace_item_expanded)
+        self._tree.itemCollapsed.connect(self._on_workspace_item_collapsed)
         self._hosts_root = QTreeWidgetItem(["Hosts"])
         self._hosts_root.setData(0, Qt.ItemDataRole.UserRole, {"kind": NodeKind.HOSTS_ROOT})
         self._hosts_root.setFlags(
@@ -276,6 +282,13 @@ class MainWindow(QMainWindow):
         return _norm_vault_key(self._connected_vault_path) == _norm_vault_key(path)
 
     def _refresh_vault_tree(self) -> None:
+        self._suppress_expand_persist = True
+        try:
+            self._refresh_vault_tree_body()
+        finally:
+            self._suppress_expand_persist = False
+
+    def _refresh_vault_tree_body(self) -> None:
         self._vault_tree.clear()
         select_key = _norm_vault_key(
             self._settings.last_vault_path or self._state.vault_path
@@ -317,7 +330,7 @@ class MainWindow(QMainWindow):
                     else:
                         parent_item.addChild(item)
                     add_children(item, node.id)
-                    item.setExpanded(True)
+                    item.setExpanded(self._settings.vault_group_expanded(node.id))
                 elif node.kind == "vault" and node.path:
                     path = Path(node.path)
                     label = path.name or str(path)
@@ -808,7 +821,15 @@ class MainWindow(QMainWindow):
     def refresh_tree(self) -> None:
         if not self._state.unlocked or self._state.vault is None:
             return
+        self._suppress_expand_persist = True
+        try:
+            self._refresh_tree_body()
+        finally:
+            self._suppress_expand_persist = False
+
+    def _refresh_tree_body(self) -> None:
         vault = self._state.vault
+        assert vault is not None
         self._hosts_root.takeChildren()
         self._scripts_root.takeChildren()
 
@@ -856,7 +877,7 @@ class MainWindow(QMainWindow):
             else:
                 root.addChild(item)
             group_items[group_id] = item
-            item.setExpanded(True)
+            item.setExpanded(bool(group.expanded))
             return item
 
         for gid in sorted(host_groups, key=lambda i: host_groups[i].name.lower()):
@@ -908,8 +929,8 @@ class MainWindow(QMainWindow):
             else:
                 self._scripts_root.addChild(item)
 
-        self._hosts_root.setExpanded(True)
-        self._scripts_root.setExpanded(True)
+        self._hosts_root.setExpanded(vault.tree_root_expanded("hosts"))
+        self._scripts_root.setExpanded(vault.tree_root_expanded("scripts"))
         self._apply_filter(self._search.text())
 
     def _apply_filter(self, text: str) -> None:
@@ -964,14 +985,127 @@ class MainWindow(QMainWindow):
             found = walk(root)
             if found is None:
                 continue
-            parent = found.parent()
-            while parent is not None:
-                parent.setExpanded(True)
-                parent = parent.parent()
+            self._suppress_expand_persist = True
+            try:
+                parent = found.parent()
+                while parent is not None:
+                    parent.setExpanded(True)
+                    parent = parent.parent()
+            finally:
+                self._suppress_expand_persist = False
             self._tree.setCurrentItem(found)
             self._tree.scrollToItem(found)
             return True
         return False
+
+    def _on_workspace_item_expanded(self, item: QTreeWidgetItem) -> None:
+        self._persist_workspace_expand(item, True)
+
+    def _on_workspace_item_collapsed(self, item: QTreeWidgetItem) -> None:
+        self._persist_workspace_expand(item, False)
+
+    def _persist_workspace_expand(
+        self, item: QTreeWidgetItem, expanded: bool
+    ) -> None:
+        from hostskeeper.runtime.tree_debug_log import log, log_exception
+
+        if self._suppress_expand_persist or not self._state.unlocked:
+            log(
+                "workspace_expand_skip",
+                reason=(
+                    "suppress"
+                    if self._suppress_expand_persist
+                    else "locked"
+                ),
+                expanded=expanded,
+                text=item.text(0),
+            )
+            return
+        node = self._node(item)
+        if not node:
+            log("workspace_expand_skip", reason="no_node", expanded=expanded)
+            return
+        kind = node.get("kind")
+        log(
+            "workspace_expand_begin",
+            expanded=expanded,
+            kind=getattr(kind, "value", kind),
+            id=node.get("id"),
+            text=item.text(0),
+            unlocked=self._state.unlocked,
+        )
+        try:
+            vault = self._vault()
+            if kind == NodeKind.HOSTS_ROOT:
+                vault.set_tree_root_expanded("hosts", expanded)
+            elif kind == NodeKind.SCRIPTS_ROOT:
+                vault.set_tree_root_expanded("scripts", expanded)
+            elif kind == NodeKind.GROUP:
+                vault.set_group_expanded(node["id"], expanded)
+            else:
+                log(
+                    "workspace_expand_skip",
+                    reason="kind",
+                    kind=getattr(kind, "value", kind),
+                )
+                return
+            log(
+                "workspace_expand_ok",
+                expanded=expanded,
+                kind=getattr(kind, "value", kind),
+                id=node.get("id"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_exception(
+                "workspace_expand_fail",
+                exc,
+                expanded=expanded,
+                kind=getattr(kind, "value", kind),
+                id=node.get("id"),
+            )
+            return
+
+    def _on_vault_item_expanded(self, item: QTreeWidgetItem) -> None:
+        self._persist_vault_expand(item, True)
+
+    def _on_vault_item_collapsed(self, item: QTreeWidgetItem) -> None:
+        self._persist_vault_expand(item, False)
+
+    def _persist_vault_expand(
+        self, item: QTreeWidgetItem, expanded: bool
+    ) -> None:
+        from hostskeeper.runtime.tree_debug_log import log, log_exception
+
+        if self._suppress_expand_persist:
+            log(
+                "vaults_expand_skip",
+                reason="suppress",
+                expanded=expanded,
+                text=item.text(0),
+            )
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict) or data.get("kind") != NodeKind.VAULT_GROUP:
+            return
+        group_id = data.get("id")
+        if not isinstance(group_id, str):
+            return
+        log(
+            "vaults_expand_begin",
+            expanded=expanded,
+            id=group_id,
+            text=item.text(0),
+        )
+        try:
+            self._settings.set_vault_group_expanded(group_id, expanded)
+            log("vaults_expand_ok", expanded=expanded, id=group_id)
+        except Exception as exc:  # noqa: BLE001
+            log_exception(
+                "vaults_expand_fail",
+                exc,
+                expanded=expanded,
+                id=group_id,
+            )
 
     def _tree_menu(self, pos) -> None:
         if not self._state.unlocked:

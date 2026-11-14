@@ -43,7 +43,10 @@ Session (runtime, не в vault):
 | kind | `hosts` \| `scripts` | В каком корне дерева |
 | parent_id | UUID? | Родительская группа |
 | host_id | UUID? | `null` = глобальное дерево; иначе папка скриптов хоста (`kind=scripts` only) |
+| expanded | bool | UI: развёрнута ли папка (default true); в MCP не отдаётся |
 | created_at / updated_at | datetime | Служебные |
+
+Дополнительно в plaintext vault: `ui_tree.hosts_root_expanded` / `ui_tree.scripts_root_expanded` (bool, default true) — состояние корней Hosts/Scripts. Дерево Vaults (группы файлов) хранит expand в `%APPDATA%\HostsKeeper\settings.json` (`vault_tree_expanded`).
 
 ## Address
 
@@ -161,7 +164,7 @@ Session (runtime, не в vault):
 - Оболочка: magic `HSVAULT1` + salt (16) + nonce (12) + ciphertext.
 - KDF: **Scrypt** (n=2¹⁴, r=8, p=1) → 32-byte key из пароля приложения.
 - AEAD: **AES-256-GCM** (AAD = magic).
-- Plaintext: JSON UTF-8, `version: 1`, словари `hosts` / `addresses` / `credentials` / `scripts` / `groups` (ключ = id UUID; `groups` опционален для старых vault).
+- Plaintext: JSON UTF-8, `version: 1`, словари `hosts` / `addresses` / `credentials` / `scripts` / `groups` (ключ = id UUID; `groups` опционален для старых vault), опционально `ui_tree` (expand корней).
 - Runtime-сессии и MCP token — только в памяти процесса (не в vault); после рестарта MCP нужно включать заново.
 
 Класс API: `hostskeeper.vault.Vault` (`create` / `unlock` / `lock` / `save` + CRUD).

@@ -60,6 +60,7 @@ class HostScriptsPanel(QWidget):
         self._on_run = on_run
         self._enabled = enabled and host_id is not None
         self._compact_hint: QSize | None = None
+        self._suppress_expand_persist = False
 
         self._hint = QLabel("Save the host first to manage its scripts.")
         self._hint.setWordWrap(True)
@@ -72,6 +73,8 @@ class HostScriptsPanel(QWidget):
         self._tree.reparent_requested.connect(self._on_reparent)
         self._tree.itemDoubleClicked.connect(self._on_double_click)
         self._tree.itemSelectionChanged.connect(self._sync_selection_actions)
+        self._tree.itemExpanded.connect(self._on_item_expanded)
+        self._tree.itemCollapsed.connect(self._on_item_collapsed)
         # Modal dialog: no cross-window DnD from main Scripts tree.
 
         btn_row = QHBoxLayout()
@@ -145,6 +148,13 @@ class HostScriptsPanel(QWidget):
         self._btn_run.setEnabled(on_script and self._on_run is not None)
 
     def refresh(self) -> None:
+        self._suppress_expand_persist = True
+        try:
+            self._refresh_body()
+        finally:
+            self._suppress_expand_persist = False
+
+    def _refresh_body(self) -> None:
         self._tree.clear()
         if self._host_id is None:
             self._sync_selection_actions()
@@ -183,7 +193,7 @@ class HostScriptsPanel(QWidget):
             else:
                 self._tree.addTopLevelItem(item)
             group_items[gid] = item
-            item.setExpanded(True)
+            item.setExpanded(bool(group.expanded))
             return item
 
         for gid in sorted(groups, key=lambda i: groups[i].name.lower()):
@@ -213,6 +223,54 @@ class HostScriptsPanel(QWidget):
             else:
                 self._tree.addTopLevelItem(item)
         self._sync_selection_actions()
+
+    def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
+        self._persist_expand(item, True)
+
+    def _on_item_collapsed(self, item: QTreeWidgetItem) -> None:
+        self._persist_expand(item, False)
+
+    def _persist_expand(self, item: QTreeWidgetItem, expanded: bool) -> None:
+        from hostskeeper.runtime.tree_debug_log import log, log_exception
+
+        if self._suppress_expand_persist or not self._vault.is_unlocked:
+            log(
+                "host_scripts_expand_skip",
+                reason=(
+                    "suppress"
+                    if self._suppress_expand_persist
+                    else "locked"
+                ),
+                expanded=expanded,
+                text=item.text(0),
+            )
+            return
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict) or payload.get("kind") != "group":
+            return
+        try:
+            gid = payload["id"]
+            group_id = UUID(str(gid)) if not isinstance(gid, UUID) else gid
+            log(
+                "host_scripts_expand_begin",
+                expanded=expanded,
+                id=str(group_id),
+                text=item.text(0),
+            )
+            self._vault.set_group_expanded(group_id, expanded)
+            log(
+                "host_scripts_expand_ok",
+                expanded=expanded,
+                id=str(group_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_exception(
+                "host_scripts_expand_fail",
+                exc,
+                expanded=expanded,
+                text=item.text(0),
+            )
+            return
 
     def _selected_payload(self) -> NodePayload | None:
         items = self._tree.selectedItems()

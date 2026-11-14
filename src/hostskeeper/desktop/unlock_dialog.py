@@ -38,7 +38,8 @@ class UnlockDialog(QDialog):
 
         self._password = QLineEdit()
         self._password.setEchoMode(QLineEdit.EchoMode.Password)
-        self._password.returnPressed.connect(self._try_unlock)
+        # Do not connect returnPressed: Enter already activates the default
+        # OK button (accepted), so a second handler would show errors twice.
 
         self._hint = QLabel()
         self._hint.setWordWrap(True)
@@ -61,6 +62,8 @@ class UnlockDialog(QDialog):
         ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok is not None:
             ok.setText("Connect")
+            ok.setDefault(True)
+            ok.setAutoDefault(True)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -68,22 +71,32 @@ class UnlockDialog(QDialog):
         layout.addWidget(buttons)
 
         self._password.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._busy = False
 
     def _try_unlock(self) -> None:
-        password = self._password.text()
-        if not password:
-            QMessageBox.warning(self, "HostsKeeper", "Password is required.")
+        if self._busy:
             return
-        self._state.vault_path = self._vault_path
+        self._busy = True
         try:
-            self._vault_path.parent.mkdir(parents=True, exist_ok=True)
-            self._state.unlock(password)
-        except InvalidPasswordError:
-            QMessageBox.critical(self, "HostsKeeper", "Invalid password or corrupt vault.")
-            self._password.selectAll()
-            self._password.setFocus(Qt.FocusReason.OtherFocusReason)
-            return
-        except OSError as exc:
-            QMessageBox.critical(self, "HostsKeeper", f"Cannot open vault:\n{exc}")
-            return
-        self.accept()
+            password = self._password.text()
+            if not password:
+                QMessageBox.warning(self, "HostsKeeper", "Password is required.")
+                return
+            self._state.vault_path = self._vault_path
+            try:
+                self._vault_path.parent.mkdir(parents=True, exist_ok=True)
+                self._state.unlock(password)
+            except InvalidPasswordError:
+                QMessageBox.critical(
+                    self, "HostsKeeper", "Invalid password or corrupt vault."
+                )
+                self._password.selectAll()
+                self._password.setFocus(Qt.FocusReason.OtherFocusReason)
+                return
+            except OSError as exc:
+                QMessageBox.critical(self, "HostsKeeper", f"Cannot open vault:\n{exc}")
+                return
+            self.accept()
+        finally:
+            self._busy = False
+

@@ -222,3 +222,25 @@ def test_groups_host_move_and_delete(tmp_path: Path) -> None:
     again.delete_group(group.id)
     assert again.get_host(host.id).group_id is None
     assert again.list_groups() == []
+
+
+def test_tree_expand_state_persists_in_vault(tmp_path: Path) -> None:
+    path = tmp_path / "expand.vault"
+    vault = Vault.create(path, "pw")
+    group = vault.add_group(Group(name="Lab", kind="hosts"))
+    assert group.expanded is True
+    assert vault.tree_root_expanded("hosts") is True
+    assert vault.tree_root_expanded("scripts") is True
+
+    vault.set_group_expanded(group.id, False)
+    vault.set_tree_root_expanded("hosts", False)
+    vault.set_tree_root_expanded("scripts", False)
+    vault.lock()
+
+    again = Vault(path)
+    again.unlock("pw")
+    assert again.get_group(group.id).expanded is False
+    assert again.tree_root_expanded("hosts") is False
+    assert again.tree_root_expanded("scripts") is False
+    mcp = again.get_group(group.id).to_mcp_dict()
+    assert "expanded" not in mcp

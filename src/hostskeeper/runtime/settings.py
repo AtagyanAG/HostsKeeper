@@ -91,6 +91,8 @@ class AppSettings:
     winscp_path: str | None = None
     # SSH connect timeout for Tab sessions (PuTTY/WinSCP use their own).
     tab_connect_timeout_sec: int = 3
+    # Vaults sidebar: group id → expanded (default True when missing).
+    vault_tree_expanded: dict[str, bool] = field(default_factory=dict)
 
     @property
     def vault_paths(self) -> list[str]:
@@ -164,12 +166,19 @@ class AppSettings:
             timeout_sec = 3
         if timeout_sec < 1:
             timeout_sec = 1
+        expanded_raw = raw.get("vault_tree_expanded") or {}
+        vault_tree_expanded: dict[str, bool] = {}
+        if isinstance(expanded_raw, dict):
+            for key, val in expanded_raw.items():
+                if isinstance(key, str) and key.strip():
+                    vault_tree_expanded[key] = bool(val)
         return cls(
             vault_nodes=nodes,
             last_vault_path=last_s,
             putty_path=putty_s,
             winscp_path=winscp_s,
             tab_connect_timeout_sec=timeout_sec,
+            vault_tree_expanded=vault_tree_expanded,
         )
 
     def save(self) -> None:
@@ -183,6 +192,9 @@ class AppSettings:
             "putty_path": self.putty_path,
             "winscp_path": self.winscp_path,
             "tab_connect_timeout_sec": int(self.tab_connect_timeout_sec),
+            "vault_tree_expanded": {
+                k: bool(v) for k, v in self.vault_tree_expanded.items()
+            },
         }
         # Always write under HostsKeeper (migrate off legacy HostsSafe folder).
         path = directory / "settings.json"
@@ -279,6 +291,16 @@ class AppSettings:
         self.last_vault_path = key
         self.save()
 
+    def vault_group_expanded(self, group_id: str) -> bool:
+        return bool(self.vault_tree_expanded.get(group_id, True))
+
+    def set_vault_group_expanded(self, group_id: str, expanded: bool) -> None:
+        prev = self.vault_tree_expanded.get(group_id, True)
+        if bool(prev) == bool(expanded):
+            return
+        self.vault_tree_expanded[group_id] = bool(expanded)
+        self.save()
+
     def add_vault_group(
         self, name: str, *, parent_id: str | None = None
     ) -> VaultNode:
@@ -289,6 +311,7 @@ class AppSettings:
             parent_id=parent_id,
         )
         self.vault_nodes.append(node)
+        self.vault_tree_expanded[node.id] = True
         self.save()
         return node
 
@@ -311,6 +334,7 @@ class AppSettings:
             if node.parent_id == group_id:
                 node.parent_id = new_parent
         self.vault_nodes = [n for n in self.vault_nodes if n.id != group_id]
+        self.vault_tree_expanded.pop(group_id, None)
         self.save()
 
     def move_vault_node(self, node_id: str, parent_id: str | None) -> None:

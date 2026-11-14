@@ -26,6 +26,8 @@ class Group:
     parent_id: UUID | None = None
     # None = global tree (Hosts / template Scripts); set = host-local Scripts folder.
     host_id: UUID | None = None
+    # UI-only: tree expand state (default expanded). Not exposed via MCP.
+    expanded: bool = True
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
 
@@ -36,9 +38,15 @@ class Group:
             "kind": self.kind,
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "host_id": str(self.host_id) if self.host_id else None,
+            "expanded": bool(self.expanded),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
+
+    def to_mcp_dict(self) -> dict[str, Any]:
+        data = self.to_dict()
+        data.pop("expanded", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Group:
@@ -48,6 +56,7 @@ class Group:
             kind=data.get("kind") or "hosts",
             parent_id=UUID(data["parent_id"]) if data.get("parent_id") else None,
             host_id=UUID(data["host_id"]) if data.get("host_id") else None,
+            expanded=bool(data.get("expanded", True)),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
         )

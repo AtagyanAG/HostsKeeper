@@ -65,6 +65,11 @@ def run_desktop(
             state.lock()
 
     app.aboutToQuit.connect(_on_quit)
+
+    from hostskeeper.runtime.tree_debug_log import log, log_path
+
+    log("app_start", f"tree log at {log_path()}")
+
     window = MainWindow(state)
     if icon is not None:
         window.setWindowIcon(icon)
