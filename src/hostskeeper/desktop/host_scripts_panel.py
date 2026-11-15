@@ -102,6 +102,17 @@ class HostScriptsPanel(QWidget):
         self._set_actions_enabled(self._enabled)
         if self._enabled:
             self.refresh()
+        from hostskeeper.desktop.vault_ui_watch import register
+
+        register(self)
+
+    def on_vault_externally_changed(self) -> None:
+        """MCP (or other) mutated vault — refresh if this host tree is on screen."""
+        if not self._enabled or self._host_id is None:
+            return
+        if not self.isVisible():
+            return
+        self.refresh()
 
     def set_compact_size_hint(self, hint: QSize | None) -> None:
         """When set, sizeHint matches Host tab so the dialog is not inflated."""
@@ -146,12 +157,66 @@ class HostScriptsPanel(QWidget):
         self._btn_del.setEnabled(on_script or on_note or on_group)
         self._btn_run.setEnabled(on_script and self._on_run is not None)
 
-    def refresh(self) -> None:
+    def refresh(
+        self, *, select: tuple[str, UUID] | None = None
+    ) -> None:
+        """Rebuild tree; keep current selection or select ``(kind, id)`` if given."""
+        restore = select
+        if restore is None:
+            payload = self._selected_payload()
+            if payload and payload.get("kind") is not None and payload.get("id") is not None:
+                try:
+                    restore = (str(payload["kind"]), UUID(str(payload["id"])))
+                except (TypeError, ValueError):
+                    restore = None
         self._suppress_expand_persist = True
         try:
             self._refresh_body()
+            if restore is not None:
+                self._select_item(restore[0], restore[1])
         finally:
             self._suppress_expand_persist = False
+
+    def _select_item(self, kind: str, item_id: UUID) -> bool:
+        """Select tree node by kind+id after rebuild; expand parents."""
+
+        def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if (
+                isinstance(data, dict)
+                and str(data.get("kind")) == kind
+                and data.get("id") is not None
+                and UUID(str(data["id"])) == item_id
+            ):
+                return item
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child is not None:
+                    found = walk(child)
+                    if found is not None:
+                        return found
+            return None
+
+        found: QTreeWidgetItem | None = None
+        for i in range(self._tree.topLevelItemCount()):
+            top = self._tree.topLevelItem(i)
+            if top is None:
+                continue
+            found = walk(top)
+            if found is not None:
+                break
+        if found is None:
+            self._sync_selection_actions()
+            return False
+        parent = found.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        self._tree.setCurrentItem(found)
+        found.setSelected(True)
+        self._tree.scrollToItem(found)
+        self._sync_selection_actions()
+        return True
 
     def _refresh_body(self) -> None:
         self._tree.clear()
@@ -329,7 +394,11 @@ class HostScriptsPanel(QWidget):
             host_id=self._host_id,
         )
         if dlg.exec() == ScriptDialog.DialogCode.Accepted:
-            self.refresh()
+            created = dlg.result_script
+            if created is not None:
+                self.refresh(select=("script", created.id))
+            else:
+                self.refresh()
 
     def _add_note(self) -> None:
         if self._host_id is None:
@@ -341,7 +410,11 @@ class HostScriptsPanel(QWidget):
             host_id=self._host_id,
         )
         if dlg.exec() == NoteDialog.DialogCode.Accepted:
-            self.refresh()
+            created = dlg.result_note
+            if created is not None:
+                self.refresh(select=("note", created.id))
+            else:
+                self.refresh()
 
     def _add_group(self) -> None:
         if self._host_id is None:
@@ -351,7 +424,7 @@ class HostScriptsPanel(QWidget):
             return
         parent_id = self._target_group_id()
         try:
-            self._vault.add_group(
+            group = self._vault.add_group(
                 Group(
                     name=name.strip(),
                     kind="scripts",
@@ -362,7 +435,7 @@ class HostScriptsPanel(QWidget):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "HostsKeeper", str(exc))
             return
-        self.refresh()
+        self.refresh(select=("group", group.id))
 
     def _edit_selected(self) -> None:
         payload = self._selected_payload()
@@ -373,22 +446,25 @@ class HostScriptsPanel(QWidget):
                 script = self._vault.get_script(UUID(str(payload["id"])))
             except (NotFoundError, ValueError):
                 return
+            script_id = script.id
             dlg = ScriptDialog(self._vault, script=script, parent=self)
             if dlg.exec() == ScriptDialog.DialogCode.Accepted:
-                self.refresh()
+                self.refresh(select=("script", script_id))
         elif payload.get("kind") == "note":
             try:
                 note = self._vault.get_note(UUID(str(payload["id"])))
             except (NotFoundError, ValueError):
                 return
+            note_id = note.id
             dlg = NoteDialog(self._vault, note=note, parent=self)
             if dlg.exec() == NoteDialog.DialogCode.Accepted:
-                self.refresh()
+                self.refresh(select=("note", note_id))
         elif payload.get("kind") == "group":
             try:
                 group = self._vault.get_group(UUID(str(payload["id"])))
             except (NotFoundError, ValueError):
                 return
+            group_id = group.id
             name, ok = QInputDialog.getText(
                 self, "Rename group", "Group name:", text=group.name
             )
@@ -400,7 +476,7 @@ class HostScriptsPanel(QWidget):
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.critical(self, "HostsKeeper", str(exc))
                 return
-            self.refresh()
+            self.refresh(select=("group", group_id))
 
     def _run_selected(self) -> None:
         payload = self._selected_payload()

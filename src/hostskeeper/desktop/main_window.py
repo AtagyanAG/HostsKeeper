@@ -762,7 +762,7 @@ class MainWindow(QMainWindow):
             self._shutting_down = False
 
     def _wire_mcp_vault_refresh(self) -> None:
-        """MCP vault mutations (scripts/groups/notes) refresh the tree on the GUI thread."""
+        """MCP vault mutations refresh workspace tree + open panels/dialogs on GUI thread."""
         svc = self._state.mcp_service
         if svc is None:
             return
@@ -781,6 +781,10 @@ class MainWindow(QMainWindow):
         if self._shutting_down:
             return
         self.refresh_tree()
+        # Open Edit Host Scripts trees, Script/Note dialogs, etc.
+        from hostskeeper.desktop.vault_ui_watch import notify_all
+
+        notify_all()
 
     def _stop_open_thread(self, timeout_ms: int = 5000) -> None:
         thread = self._open_thread

@@ -242,12 +242,11 @@ class HostDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         # Timestamps above tabs (Host dialog chrome).
-        layout.addWidget(
-            _timestamps_label(
-                host.created_at if host is not None else None,
-                host.updated_at if host is not None else None,
-            )
+        self._ts_label = _timestamps_label(
+            host.created_at if host is not None else None,
+            host.updated_at if host is not None else None,
         )
+        layout.addWidget(self._ts_label)
         layout.addWidget(tabs)
         layout.addSpacing(8)
         layout.addWidget(buttons)
@@ -263,6 +262,35 @@ class HostDialog(QDialog):
             self._dialog_width = int(max(hint_w, 280) * 1.4)
         self.setMinimumWidth(self._dialog_width)
         self._fit_host_height()
+        from hostskeeper.desktop.vault_ui_watch import register
+
+        register(self)
+
+    def on_vault_externally_changed(self) -> None:
+        """Sync host fields / Notes when MCP updates this host (Scripts panel self-refreshes)."""
+        if self._host is None or not self.isVisible():
+            return
+        try:
+            host = self._vault.get_host(self._host.id)
+        except NotFoundError:
+            QMessageBox.information(
+                self,
+                "HostsKeeper",
+                "This host was deleted externally (e.g. by MCP).",
+            )
+            self.reject()
+            return
+        self._host = host
+        self._name.setText(host.name)
+        self._description.setText(host.description or "")
+        self._tags.setText(_tags_to_text(host.tags))
+        self._profile.setPlainText(host.profile or "")
+        if self._notes_preview.isChecked():
+            self._refresh_notes_preview()
+        self._ts_label.setText(
+            f"Created: {_format_ts(host.created_at)}    "
+            f"Modified: {_format_ts(host.updated_at)}"
+        )
 
     def _fit_host_height(self) -> None:
         self._scripts_panel.set_compact_size_hint(self._host_page.sizeHint())
@@ -1254,16 +1282,55 @@ class ScriptDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            _timestamps_label(
-                script.created_at if script is not None else None,
-                script.updated_at if script is not None else None,
-            )
+        self._ts_label = _timestamps_label(
+            script.created_at if script is not None else None,
+            script.updated_at if script is not None else None,
         )
+        layout.addWidget(self._ts_label)
         layout.addLayout(form)
         layout.addWidget(splitter, stretch=1)
         layout.addWidget(buttons)
         self.resize(520, 560)
+        self._result: Script | None = None
+        from hostskeeper.desktop.vault_ui_watch import register
+
+        register(self)
+
+    @property
+    def result_script(self) -> Script | None:
+        return self._result
+
+    def on_vault_externally_changed(self) -> None:
+        """Reload or close if MCP changed/deleted this script while dialog is open."""
+        if self._script is None or not self.isVisible():
+            return
+        try:
+            script = self._vault.get_script(self._script.id)
+        except NotFoundError:
+            QMessageBox.information(
+                self,
+                "HostsKeeper",
+                "This script was deleted externally (e.g. by MCP).",
+            )
+            self.reject()
+            return
+        self._script = script
+        self._name.setText(script.name)
+        self._description.setText(script.description or "")
+        self._tags.setText(_tags_to_text(script.tags))
+        self._body.setPlainText(script.body)
+        self._params.setPlainText(
+            json.dumps(
+                [p.to_dict() for p in script.parameters],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        self._ts_label.setText(
+            f"Created: {_format_ts(script.created_at)}    "
+            f"Modified: {_format_ts(script.updated_at)}"
+        )
+        self.setWindowTitle("Edit Script")
 
     def _save(self) -> None:
         name = self._name.text().strip()
@@ -1295,7 +1362,7 @@ class ScriptDialog(QDialog):
             return
         try:
             if self._script is None:
-                self._vault.add_script(
+                self._result = self._vault.add_script(
                     Script(
                         name=name,
                         body=body,
@@ -1313,7 +1380,7 @@ class ScriptDialog(QDialog):
                 s.description = self._description.text().strip() or None
                 s.tags = _tags_from_text(self._tags.text())
                 s.parameters = params
-                self._vault.update_script(s)
+                self._result = self._vault.update_script(s)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "HostsKeeper", str(exc))
             return
@@ -1380,17 +1447,45 @@ class NoteDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            _timestamps_label(
-                note.created_at if note is not None else None,
-                note.updated_at if note is not None else None,
-            )
+        self._ts_label = _timestamps_label(
+            note.created_at if note is not None else None,
+            note.updated_at if note is not None else None,
         )
+        layout.addWidget(self._ts_label)
         layout.addLayout(top)
         layout.addWidget(self._stack, stretch=1)
         layout.addWidget(buttons)
         self.setMinimumSize(480, 360)
         self._result: Note | None = None
+        from hostskeeper.desktop.vault_ui_watch import register
+
+        register(self)
+
+    def on_vault_externally_changed(self) -> None:
+        """Reload or close if MCP changed/deleted this note while dialog is open."""
+        if self._note is None or not self.isVisible():
+            return
+        try:
+            note = self._vault.get_note(self._note.id)
+        except NotFoundError:
+            QMessageBox.information(
+                self,
+                "HostsKeeper",
+                "This note was deleted externally (e.g. by MCP).",
+            )
+            self.reject()
+            return
+        self._note = note
+        self._name.setText(note.name)
+        self._mcp.setChecked(bool(note.mcp_enabled))
+        self._body.setPlainText(note.body)
+        self._ts_label.setText(
+            f"Created: {_format_ts(note.created_at)}    "
+            f"Modified: {_format_ts(note.updated_at)}"
+        )
+        if self._preview.isChecked():
+            self._refresh_preview()
+        self.setWindowTitle("Edit Note")
 
     def _on_preview_toggled(self, preview: bool) -> None:
         if preview:
