@@ -1,8 +1,9 @@
-"""Stable LAN MCP app key (Cursor mcp.json — без per-tab token)."""
+"""Stable LAN MCP app key (VS Code HTTP config; no per-tab token)."""
 
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import secrets
 from pathlib import Path
@@ -69,20 +70,28 @@ def keys_match(provided: str | None, expected: str) -> bool:
 
 
 def mcp_gateway_url(*, host: str, port: int, key: str) -> str:
-    """Stable Cursor URL (query key)."""
+    """Legacy stable gateway URL with the app key in the query string."""
     return f"http://{host}:{port}/mcp?key={quote(key, safe='')}"
 
 
-def cursor_mcp_config(*, host: str, port: int, key: str, name: str = "hostskeeper") -> str:
-    """Snippet for Cursor mcp.json (url only — no per-tab edits)."""
-    url = mcp_gateway_url(host=host, port=port, key=key)
-    # Compact JSON suitable for clipboard.
-    return (
-        '{\n'
-        f'  "mcpServers": {{\n'
-        f'    "{name}": {{\n'
-        f'      "url": "{url}"\n'
-        f'    }}\n'
-        f'  }}\n'
-        f'}}\n'
-    )
+def vscode_mcp_config(
+    *, host: str, port: int, key: str, name: str = "hostskeeper"
+) -> str:
+    """Return a VS Code MCP config using the app key as an HTTP header."""
+    config = {
+        "servers": {
+            name: {
+                "type": "http",
+                "url": f"http://{host}:{port}/mcp",
+                "headers": {"X-HostsKeeper-Key": key},
+            }
+        }
+    }
+    return json.dumps(config, ensure_ascii=False, indent=2) + "\n"
+
+
+def cursor_mcp_config(
+    *, host: str, port: int, key: str, name: str = "hostskeeper"
+) -> str:
+    """Compatibility alias for the former Cursor-named config generator."""
+    return vscode_mcp_config(host=host, port=port, key=key, name=name)

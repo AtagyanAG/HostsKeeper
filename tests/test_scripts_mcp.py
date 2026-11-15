@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -10,7 +11,15 @@ from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.scripts_render import render_script
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session import SessionManager
-from hostskeeper.vault import Address, Credential, Host, Script, ScriptParameter, Vault
+from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
+from hostskeeper.vault import (
+    Address,
+    Credential,
+    Host,
+    Script,
+    ScriptParameter,
+    Vault,
+)
 from tests.lab_env import (
     HOST,
     KEY_PATH,
@@ -143,6 +152,45 @@ def test_mcp_redacts_and_preserves_user_value(tmp_path: Path) -> None:
     other = vault.get_script_by_name("other")
     # Inbound user_value ignored; seeded from default on create.
     assert other.parameters[0].user_value == "from-default"
+
+
+def test_scripts_list_scope_and_duplicate_name_requires_selector(
+    tmp_path: Path,
+) -> None:
+    vault = Vault.create(tmp_path / "duplicate.vault", "test-pass")
+    host = vault.add_host(Host(name="lab"))
+    template = vault.add_script(Script(name="deploy", body="echo template"))
+    host_script = vault.add_script(
+        Script(name="deploy", body="echo host", host_id=host.id)
+    )
+    sessions = SessionManager(vault)
+    session = SessionInfo(
+        id=uuid4(),
+        alias="lab-user-1",
+        status=SessionStatus.LIVE,
+        host_id=host.id,
+        address_id=uuid4(),
+        credential_id=uuid4(),
+        target=SessionTarget.TAB,
+        mcp_enabled=True,
+    )
+    sessions.list_mcp_sessions = lambda: [session]
+    service = McpToolService(sessions, vault)
+    access = McpAccess(mode="stdio")
+
+    listed = service.scripts_list(access)["scripts"]
+    by_id = {entry["id"]: entry for entry in listed}
+    assert by_id[str(template.id)]["scope"] == "template"
+    assert by_id[str(template.id)]["host_alias"] is None
+    assert by_id[str(host_script.id)]["scope"] == "host"
+    assert by_id[str(host_script.id)]["host_alias"] == "lab-user-1"
+
+    with pytest.raises(McpToolError, match="ambiguous script name") as exc:
+        service.scripts_get(access, name="deploy")
+    assert exc.value.code == "invalid_args"
+    assert service.scripts_get(access, id=str(host_script.id))["id"] == str(
+        host_script.id
+    )
 
 
 @pytest.mark.skipif(

@@ -49,7 +49,7 @@ from hostskeeper.desktop.folder_icon import (
 from hostskeeper.desktop.session_tab import SessionTab, _OpenTabWorker, _public_mcp_host
 from hostskeeper.desktop.unlock_dialog import UnlockDialog
 from hostskeeper.launchers import discover_launchers, launch_putty, launch_winscp
-from hostskeeper.mcp.app_key import cursor_mcp_config
+from hostskeeper.mcp.app_key import vscode_mcp_config
 from hostskeeper.runtime.mcp_http import ensure_mcp_http, stop_mcp_http
 from hostskeeper.runtime.settings import AppSettings, default_vault_path
 from hostskeeper.runtime.state import AppState
@@ -2021,12 +2021,12 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "MCP", "MCP key is not available.")
             return
         host = _public_mcp_host(self._state.mcp_host)
-        text = cursor_mcp_config(
+        text = vscode_mcp_config(
             host=host, port=self._state.mcp_port, key=self._state.mcp_key
         )
         QGuiApplication.clipboard().setText(text)
         self._status.showMessage(
-            f"MCP config copied · http://{host}:{self._state.mcp_port}/mcp?key=…"
+            f"VS Code MCP config copied · http://{host}:{self._state.mcp_port}/mcp"
         )
 
     def _change_mcp_key(self) -> None:
@@ -2035,7 +2035,7 @@ class MainWindow(QMainWindow):
             "Change MCP Key",
             "Generate a new MCP app key?\n\n"
             "The old key stops working immediately. "
-            "Update Cursor mcp.json with Copy MCP config.",
+            "Update VS Code mcp.json with Copy MCP config.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -2050,5 +2050,5 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Change MCP Key",
-            "New MCP key is active.\nUse Copy MCP config to update Cursor.",
+            "New MCP key is active.\nUse Copy MCP config to update VS Code.",
         )

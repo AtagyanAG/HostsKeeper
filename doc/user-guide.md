@@ -24,13 +24,13 @@ python -m hostskeeper
    Во вкладке **Notes** — Markdown-профиль хоста (ОС, пакеты, runtimes) для ИИ; переключатель **Preview** включает просмотр.
    В дереве **Scripts** (и Scripts хоста): листья **Script** и **Note** (Markdown-заметка, ПКМ New Note). У Note чекбокс **MCP** — доступ через `notes_*` без Approve.
 2. Выберите их → **+** на панели вкладок.
-3. Включите **MCP** на вкладке. Один раз: **Options → Copy MCP config** → вставьте в Cursor `mcp.json`
-   (`http://<ip>:8765/mcp?key=...`). Дальше ИИ: `session_list` → `session_attach(alias=…)`.
+3. Включите **MCP** на вкладке. Один раз: **Options → Copy MCP config** → вставьте готовый JSON в VS Code `mcp.json`.
+   App key передаётся в заголовке `X-HostsKeeper-Key`, не в URL. Дальше ИИ: `session_list` → `session_attach(alias=…)`.
    В **Options** сверху — путь к `settings.json` (только просмотр): **Open Folder** (Explorer с выделением файла) и **Edit** (Notepad).
-   **Change MCP Key** — новый app key (старый URL перестаёт работать); потом снова **Copy MCP config**.
+   **Change MCP Key** — новый app key (старый ключ перестаёт работать); потом снова **Copy MCP config**.
 4. Чтобы ИИ мог писать в терминал / запускать скрипты — включите **Approve** на вкладке
    (по умолчанию выкл: модель только читает вывод).
-5. Вставьте URL в Cursor MCP / чат ассистенту.
+5. Проверьте подключение в VS Code и вызовите `session_list` из чата ассистента.
 6. ИИ видит alias через `session_info`, читает вывод; пишет команды только при включённом Approve.
 
 ## Терминал во вкладке

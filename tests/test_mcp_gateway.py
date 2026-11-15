@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,7 @@ from hostskeeper.mcp.app_key import (
     mcp_gateway_url,
     resolve_mcp_key,
     rotate_mcp_key,
+    vscode_mcp_config,
 )
 from hostskeeper.mcp.http_app import create_http_app
 from hostskeeper.mcp.service import McpAccess, McpToolService
@@ -60,13 +62,22 @@ def test_rotate_mcp_key_file(tmp_path: Path) -> None:
     assert resolve_mcp_key(key_path=path) == k2
 
 
-def test_gateway_url_and_cursor_snippet() -> None:
+def test_gateway_url_and_vscode_config() -> None:
     url = mcp_gateway_url(host="127.0.0.1", port=8765, key=APP_KEY)
     assert url == f"http://127.0.0.1:8765/mcp?key={APP_KEY}"
-    snip = cursor_mcp_config(host="127.0.0.1", port=8765, key=APP_KEY)
-    assert '"url"' in snip
-    assert APP_KEY in snip
+    snip = vscode_mcp_config(host="127.0.0.1", port=8765, key=APP_KEY)
+    config = json.loads(snip)
+    server = config["servers"]["hostskeeper"]
+    assert server == {
+        "type": "http",
+        "url": "http://127.0.0.1:8765/mcp",
+        "headers": {"X-HostsKeeper-Key": APP_KEY},
+    }
+    assert "key=" not in server["url"]
     assert "token=" not in snip
+    assert json.loads(
+        cursor_mcp_config(host="127.0.0.1", port=8765, key=APP_KEY)
+    ) == config
 
 
 def test_gateway_list_attach_and_middleware(tmp_path: Path) -> None:

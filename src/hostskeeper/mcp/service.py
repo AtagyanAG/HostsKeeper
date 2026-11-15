@@ -317,7 +317,11 @@ class McpToolService:
 
     def scripts_list(self, access: McpAccess) -> dict[str, Any]:
         self._assert_access(access)
-        visible_hosts = self._accessible_host_ids(access)
+        visible_sessions = self._visible_sessions(access)
+        visible_hosts = {session.host_id for session in visible_sessions}
+        host_aliases: dict[UUID, str] = {}
+        for session in visible_sessions:
+            host_aliases.setdefault(session.host_id, session.alias)
         scripts = []
         for script in self._vault.list_scripts():
             if script.host_id is not None and script.host_id not in visible_hosts:
@@ -326,6 +330,12 @@ class McpToolService:
                 {
                     "id": str(script.id),
                     "name": script.name,
+                    "scope": "host" if script.host_id is not None else "template",
+                    "host_alias": (
+                        host_aliases.get(script.host_id)
+                        if script.host_id is not None
+                        else None
+                    ),
                     "description": script.description,
                     "tags": list(script.tags),
                     "parameters": [p.to_mcp_dict() for p in script.parameters],
@@ -866,11 +876,6 @@ class McpToolService:
                 if not self._script_visible(access, script):
                     raise McpToolError("not_found", "script not found")
                 return script
-            # Prefer template; else unique match among visible host scripts.
-            try:
-                return self._vault.get_script_by_name(name, host_id=None)
-            except NotFoundError:
-                pass
             matches = [
                 s
                 for s in self._vault.list_scripts()

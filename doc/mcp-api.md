@@ -7,26 +7,25 @@
 - Сервер слушает на LAN (host/port приложения).
 - Клиент подключается со **стабильным app key** приложения (не per-tab).
 - Key: `~/.hostskeeper/mcp.key`, env `HOSTSKEEPER_MCP_KEY`, или `--mcp-key`.
-- Смена ключа: Options → **Change MCP Key** (перезаписывает файл; старый URL сразу 401). Затем **Copy MCP config**.
-- URL для Cursor (один раз в mcp.json; Options → **Copy MCP config**):
-
-```text
-http://<safe-host>:<port>/mcp?key=<app-key>
-```
-
-Также: заголовок `X-HostsKeeper-Key` или `Authorization: Bearer <app-key>`.
+- Смена ключа: Options → **Change MCP Key** (перезаписывает файл; старый ключ сразу 401). Затем снова **Copy MCP config**.
+- Options → **Copy MCP config** копирует готовую запись для VS Code (`mcp.json`); ключ передаётся заголовком `X-HostsKeeper-Key`, не в URL.
+- Сервер также принимает `?key=<app-key>` и `Authorization: Bearer <app-key>` для совместимости.
 
 - Область: все вкладки с `mcp_enabled=true` + все скрипты (как stdio).
 - Выбор вкладки: `session_list` → `session_attach(alias=…)` или `alias`/`session_id` в каждом tool.
 - Человек по-прежнему обязан включить **MCP** на нужных вкладках.
 
-Пример Cursor `mcp.json`:
+Пример VS Code `mcp.json`:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "hostskeeper": {
-      "url": "http://127.0.0.1:8765/mcp?key=<app-key>"
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers": {
+        "X-HostsKeeper-Key": "<app-key>"
+      }
     }
   }
 }
@@ -52,6 +51,9 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 - Секреты и сетевые параметры хостов **не** возвращаются ни в одном tool.
 - Approve (чекбокс на вкладке): **выкл по умолчанию** — MCP только читает терминал; `session_write` / `scripts_run` сразу → `approve_required`. **вкл** — write/run без модалки и без таймаута.
 - При `status=disconnected` операции ввода/чтения потока завершаются ошибкой `disconnected` (кроме информационных, где status явно отдаётся).
+- В `initialize.result` сервер передаёт workflow в `instructions`; `serverInfo.version` соответствует версии пакета.
+- Успешный `tools/call` возвращает объект в `structuredContent` и его JSON-представление в `content`. Ошибки инструментов имеют `isError=true` и содержат прикладной код/сообщение; ошибки JSON-RPC протокола остаются отдельными.
+- `notifications/initialized` не возвращает JSON-RPC body (Streamable HTTP отвечает `202 Accepted` с пустым телом). Для POST MCP-клиент должен объявить поддержку `application/json` и `text/event-stream`; GET используется для SSE-потока.
 
 ## Tools
 
@@ -124,7 +126,7 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 
 ### session_read
 
-Новые строки с внутреннего курсора клиента (или с указанного `cursor`).
+Текст из буфера вывода, начиная с `cursor`.
 
 Вход:
 
@@ -136,6 +138,8 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
   "max_bytes": 65536
 }
 ```
+
+Несмотря на историческое имя, `max_bytes` ограничивает число символов, а не UTF-8 байтов; допустимо `1..1048576`. Без cursor чтение начинается с начала сохранённого буфера. Используйте возвращённый `cursor` для следующей порции. `truncated=true` означает, что в буфере остались данные. Cursor — строковое представление смещения в символах, а не непрозрачный токен.
 
 Выход:
 
@@ -161,6 +165,8 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 { "type": "output", "alias": "string", "cursor": "string", "data": "string" }
 { "type": "status", "alias": "string", "status": "disconnected|live|closed" }
 ```
+
+При таймауте возвращается `type=output` с пустым `data` и актуальным cursor.
 
 ### Реализация
 
@@ -200,7 +206,9 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 
 Шаблоны (`host_id=null`) — всегда. Скрипты хоста — только если у клиента есть открытая MCP-вкладка этого хоста.
 
-Выход: `id`, `name`, `description`, `tags`, `parameters` (без `user_value`), `host_id`, `group_id`.
+Выход: `id`, `name`, `scope` (`template` или `host`), `host_alias` (alias доступной вкладки хоста или `null`), `description`, `tags`, `parameters` (без `user_value`), `host_id`, `group_id`.
+
+Если имя совпадает у нескольких видимых скриптов, используйте `id` из списка или явно укажите `host_id`; выбор по неоднозначному имени завершается `invalid_args`.
 
 ### scripts_get
 

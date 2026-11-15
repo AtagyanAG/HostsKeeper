@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -11,12 +12,63 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hostskeeper.mcp.context import set_access
 from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.server import build_mcp_server
 from hostskeeper.mcp.service import McpAccess, McpToolService
+
+
+class RejectBatchRequests:
+    """Reject JSON-RPC batches without exposing SDK/Pydantic validation details."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] != "POST":
+            await self._app(scope, receive, send)
+            return
+
+        buffered = []
+        first_content = bytearray()
+        while len(first_content) <= 65536:
+            message = await receive()
+            buffered.append(message)
+            if message["type"] != "http.request":
+                break
+            first_content.extend(message.get("body", b"").lstrip())
+            if first_content or not message.get("more_body", False):
+                break
+
+        if first_content.startswith(b"["):
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32600,
+                        "message": "Batch requests are not supported.",
+                    },
+                }
+            ).encode("utf-8")
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 400,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        async def replay_receive() -> dict:
+            if buffered:
+                return buffered.pop(0)
+            return await receive()
+
+        await self._app(scope, replay_receive, send)
 
 
 def _header(request: Request, *names: str) -> str | None:
@@ -121,7 +173,7 @@ def create_http_app(
     Binding ``0.0.0.0`` keeps protection off (auth is app key / tab token).
     """
     mcp = build_mcp_server(service)
-    inner = mcp.streamable_http_app(host=host)
+    inner = RejectBatchRequests(mcp.streamable_http_app(host=host))
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
