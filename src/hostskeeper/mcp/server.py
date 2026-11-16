@@ -321,6 +321,27 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
             _raise_tool_error(exc)
 
     @mcp.tool(annotations=_READ_ONLY)
+    def scripts_compare(
+        left_script_id: Annotated[str, Field(description="First script ID from scripts_list.")],
+        right_script_id: Annotated[str, Field(description="Second script ID from scripts_list.")],
+    ) -> dict[str, Any]:
+        """Compare two scripts visible to this client without changing either.
+
+        Reports differences in name, description, and parameter metadata, plus a
+        bounded unified diff of their bodies. Both IDs must be visible in the
+        current MCP scope; unavailable and nonexistent scripts are not
+        distinguished.
+        """
+        try:
+            return service.scripts_compare(
+                get_access(),
+                left_script_id=left_script_id,
+                right_script_id=right_script_id,
+            )
+        except McpToolError as exc:
+            _raise_tool_error(exc)
+
+    @mcp.tool(annotations=_READ_ONLY)
     def scripts_validate(
         body: Annotated[str, Field(description="Draft shell text; it is analyzed but never saved or run.")],
         parameters: Annotated[

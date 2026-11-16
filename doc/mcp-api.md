@@ -223,6 +223,50 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 MCP-вкладке этого хоста. Отсутствующий и недоступный по scope скрипты намеренно
 неразличимы.
 
+### scripts_compare
+
+Read-only сравнение двух явно выбранных скриптов. Оба ID должны быть доступны в
+scope текущего клиента (шаблоны доступны всегда; host-bound скрипты — при
+открытой MCP-вкладке соответствующего хоста). Недоступный и отсутствующий ID
+неразличимы. Никакие данные vault не меняются.
+
+Вход:
+
+```json
+{
+  "left_script_id": "uuid",
+  "right_script_id": "uuid"
+}
+```
+
+Выход содержит идентификаторы/имена сторон, отличающиеся поля `name`,
+`description`, `parameters` с обеими версиями, а также unified diff body.
+В параметрах нет `user_value`. Diff ограничен 20 000 символами; если он длиннее,
+`body_diff_truncated=true` и в конце diff указывается усечение.
+
+```json
+{
+  "left": { "id": "uuid", "name": "template" },
+  "right": { "id": "uuid", "name": "host-script" },
+  "metadata_differences": {
+    "description": { "left": null, "right": "Host-specific behavior" },
+    "parameters": {
+      "left": [],
+      "right": [
+        {
+          "name": "port",
+          "description": null,
+          "required": true,
+          "default": "2222"
+        }
+      ]
+    }
+  },
+  "body_diff": "--- <left-id>\n+++ <right-id>\n@@ ...",
+  "body_diff_truncated": false
+}
+```
+
 ### scripts_validate
 
 Read-only preflight для draft скрипта. Ничего не сохраняет, не рендерит shell

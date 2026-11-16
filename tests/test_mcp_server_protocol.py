@@ -83,6 +83,7 @@ def test_streamable_http_metadata_errors_and_structured_results(
         by_name = {tool["name"]: tool for tool in tools}
         assert by_name["session_list"]["outputSchema"]["type"] == "object"
         assert by_name["session_list"]["annotations"]["readOnlyHint"] is True
+        assert by_name["scripts_compare"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_validate"]["annotations"]["readOnlyHint"] is True
         assert by_name["groups_delete"]["annotations"]["destructiveHint"] is True
 

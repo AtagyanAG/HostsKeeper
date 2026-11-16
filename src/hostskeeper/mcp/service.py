@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from difflib import unified_diff
 from typing import Any, Literal
 from uuid import UUID
 
@@ -29,6 +30,7 @@ _SCRIPT_NOT_FOUND_MESSAGE = (
     "script not found or not visible to this client; refresh scripts_list. "
     "Host scripts require an MCP-enabled open tab for that host."
 )
+_SCRIPT_DIFF_MAX_CHARS = 20_000
 
 
 @dataclass
@@ -360,6 +362,66 @@ class McpToolService:
         self._assert_access(access)
         script = self._find_script(access, id=id, name=name, host_id=host_id)
         return script.to_mcp_dict()
+
+    def scripts_compare(
+        self,
+        access: McpAccess,
+        *,
+        left_script_id: str,
+        right_script_id: str,
+    ) -> dict[str, Any]:
+        """Compare two scripts visible to this client without modifying the vault."""
+        self._assert_access(access)
+        left = self._find_script(access, id=left_script_id, name=None)
+        right = self._find_script(access, id=right_script_id, name=None)
+
+        left_parameters = [parameter.to_mcp_dict() for parameter in left.parameters]
+        right_parameters = [parameter.to_mcp_dict() for parameter in right.parameters]
+        metadata: dict[str, Any] = {}
+        for field, left_value, right_value in (
+            ("name", left.name, right.name),
+            ("description", left.description, right.description),
+            ("parameters", left_parameters, right_parameters),
+        ):
+            if left_value != right_value:
+                metadata[field] = {"left": left_value, "right": right_value}
+
+        def diff_input(body: str) -> list[str]:
+            lines = body.splitlines(keepends=True)
+            if lines and not lines[-1].endswith(("\n", "\r")):
+                lines[-1] += "\n"
+            return lines
+
+        diff_lines = unified_diff(
+            diff_input(left.body),
+            diff_input(right.body),
+            fromfile=str(left.id),
+            tofile=str(right.id),
+        )
+        diff_parts: list[str] = []
+        diff_length = 0
+        truncated = False
+        for line in diff_lines:
+            if diff_length + len(line) > _SCRIPT_DIFF_MAX_CHARS:
+                truncated = True
+                break
+            diff_parts.append(line)
+            diff_length += len(line)
+
+        body_diff = "".join(diff_parts)
+        if truncated:
+            marker = "\n... diff truncated; compare smaller script sections ...\n"
+            while diff_parts and diff_length + len(marker) > _SCRIPT_DIFF_MAX_CHARS:
+                diff_length -= len(diff_parts.pop())
+            body_diff = "".join(diff_parts) + marker
+
+        return {
+            "left": {"id": str(left.id), "name": left.name},
+            "right": {"id": str(right.id), "name": right.name},
+            "metadata_differences": metadata,
+            "body_diff": body_diff,
+            "body_diff_truncated": truncated,
+        }
 
     def scripts_validate(
         self,

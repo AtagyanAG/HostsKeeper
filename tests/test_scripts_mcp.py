@@ -292,7 +292,19 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
     hidden_host = vault.add_host(Host(name="hidden"))
     template = vault.add_script(Script(name="deploy", body="echo template"))
     host_script = vault.add_script(
-        Script(name="deploy", body="echo host", host_id=host.id)
+        Script(
+            name="deploy",
+            body="echo host",
+            description="host-specific deployment",
+            parameters=[
+                ScriptParameter(
+                    name="port",
+                    default="2222",
+                    user_value="private-user-value",
+                )
+            ],
+            host_id=host.id,
+        )
     )
     hidden_script = vault.add_script(
         Script(name="private", body="echo hidden", host_id=hidden_host.id)
@@ -322,6 +334,29 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
     for entry in listed:
         assert service.scripts_get(access, id=entry["id"])["id"] == entry["id"]
 
+    before_template = vault.get_script(template.id).to_dict()
+    before_host_script = vault.get_script(host_script.id).to_dict()
+    compared = service.scripts_compare(
+        access,
+        left_script_id=str(template.id),
+        right_script_id=str(host_script.id),
+    )
+    assert compared["left"] == {"id": str(template.id), "name": "deploy"}
+    assert compared["right"] == {"id": str(host_script.id), "name": "deploy"}
+    assert compared["metadata_differences"]["description"] == {
+        "left": None,
+        "right": "host-specific deployment",
+    }
+    assert (
+        compared["metadata_differences"]["parameters"]["right"][0]["default"]
+        == "2222"
+    )
+    assert "private-user-value" not in str(compared)
+    assert f"-echo template\n+echo host\n" in compared["body_diff"]
+    assert compared["body_diff_truncated"] is False
+    assert vault.get_script(template.id).to_dict() == before_template
+    assert vault.get_script(host_script.id).to_dict() == before_host_script
+
     with pytest.raises(McpToolError, match="ambiguous script name") as exc:
         service.scripts_get(access, name="deploy")
     assert exc.value.code == "invalid_args"
@@ -336,6 +371,35 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
     assert "refresh scripts_list" in unavailable_messages[0]
     assert "MCP-enabled open tab" in unavailable_messages[0]
     assert str(hidden_script.id) not in unavailable_messages[0]
+    compare_errors = []
+    for script_id in (str(hidden_script.id), str(uuid4())):
+        with pytest.raises(McpToolError) as compare_unavailable:
+            service.scripts_compare(
+                access,
+                left_script_id=str(host_script.id),
+                right_script_id=script_id,
+            )
+        assert compare_unavailable.value.code == "not_found"
+        compare_errors.append(str(compare_unavailable.value))
+    assert compare_errors[0] == compare_errors[1]
+    assert str(hidden_script.id) not in compare_errors[0]
+
+
+def test_scripts_compare_bounds_body_diff(tmp_path: Path) -> None:
+    vault = Vault.create(tmp_path / "compare-large.vault", "test-pass")
+    left = vault.add_script(Script(name="left", body=("left line\n" * 2500)))
+    right = vault.add_script(Script(name="right", body=("right line\n" * 2500)))
+    service = McpToolService(SessionManager(vault), vault)
+
+    compared = service.scripts_compare(
+        McpAccess(mode="stdio"),
+        left_script_id=str(left.id),
+        right_script_id=str(right.id),
+    )
+
+    assert compared["body_diff_truncated"] is True
+    assert len(compared["body_diff"]) <= 20_000
+    assert "diff truncated" in compared["body_diff"]
 
 
 @pytest.mark.skipif(
