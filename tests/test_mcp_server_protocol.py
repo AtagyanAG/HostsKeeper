@@ -83,6 +83,7 @@ def test_streamable_http_metadata_errors_and_structured_results(
         by_name = {tool["name"]: tool for tool in tools}
         assert by_name["session_list"]["outputSchema"]["type"] == "object"
         assert by_name["session_list"]["annotations"]["readOnlyHint"] is True
+        assert by_name["scripts_validate"]["annotations"]["readOnlyHint"] is True
         assert by_name["groups_delete"]["annotations"]["destructiveHint"] is True
 
         success = client.post(
@@ -114,12 +115,41 @@ def test_streamable_http_metadata_errors_and_structured_results(
         assert "invalid_args" in failure_result["content"][0]["text"]
         assert "Traceback" not in failure_result["content"][0]["text"]
 
-        unknown = client.post(
+        validation = client.post(
             "/mcp?key=protocol-test-key",
             headers=request_headers,
             json={
                 "jsonrpc": "2.0",
                 "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "scripts_validate",
+                    "arguments": {
+                        "body": "echo {{token}}",
+                        "parameters": [
+                            {
+                                "name": "token",
+                                "required": True,
+                                "default": "sensitive-default",
+                            }
+                        ],
+                        "params": {"token": "sensitive-input"},
+                    },
+                },
+            },
+        )
+        validation_result = _event_payload(validation)["result"]
+        assert validation_result["isError"] is False
+        assert validation_result["structuredContent"]["ready_to_run"] is True
+        assert "sensitive-default" not in validation.text
+        assert "sensitive-input" not in validation.text
+
+        unknown = client.post(
+            "/mcp?key=protocol-test-key",
+            headers=request_headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 6,
                 "method": "tools/call",
                 "params": {"name": "not_a_tool", "arguments": {}},
             },

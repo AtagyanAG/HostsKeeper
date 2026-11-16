@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from hostskeeper.mcp.errors import McpToolError
-from hostskeeper.mcp.scripts_render import render_script
+from hostskeeper.mcp.scripts_render import analyze_script, render_script
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session import SessionManager
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
@@ -51,6 +51,136 @@ def test_render_defaults() -> None:
         parameters=[ScriptParameter(name="iface", required=False, default="lo")],
     )
     assert render_script(script, {}) == "echo lo"
+
+
+def test_analyze_script_reports_errors_warnings_and_safe_missing_values() -> None:
+    analysis = analyze_script(
+        "echo {{iface}} {{missing}} {{bad name}}",
+        [
+            ScriptParameter(
+                name="iface",
+                required=True,
+                default="sensitive-default",
+            ),
+            ScriptParameter(name="unused", required=True),
+        ],
+    )
+    result = analysis.to_dict()
+
+    assert result["valid"] is False
+    assert result["ready_to_run"] is False
+    assert result["placeholders"][0] == {"name": "iface", "position": 5}
+    assert {item["code"] for item in result["errors"]} == {
+        "malformed_placeholder",
+        "unknown_placeholder",
+    }
+    malformed_position = len("echo {{iface}} {{missing}} ")
+    assert {
+        item["position"]
+        for item in result["errors"]
+        if item["code"] == "malformed_placeholder"
+    } == {malformed_position}
+    assert result["warnings"] == [{"code": "unused_parameter", "name": "unused"}]
+    assert "sensitive-default" not in str(result)
+
+    missing = analyze_script(
+        "echo {{token}}",
+        [ScriptParameter(name="token", required=True)],
+    ).to_dict()
+    assert missing["valid"] is True
+    assert missing["ready_to_run"] is False
+    assert missing["missing_parameters"] == ["token"]
+
+    invalid_parameters = analyze_script(
+        "echo ready",
+        [
+            ScriptParameter(name="invalid-name"),
+            ScriptParameter(name="duplicate"),
+            ScriptParameter(name="duplicate"),
+        ],
+    ).to_dict()
+    assert {item["code"] for item in invalid_parameters["errors"]} == {
+        "invalid_parameter_name",
+        "duplicate_parameter",
+    }
+
+
+def test_unused_required_parameters_do_not_block_rendering() -> None:
+    script = Script(
+        name="x",
+        body="echo ready",
+        parameters=[ScriptParameter(name="unused", required=True)],
+    )
+
+    assert render_script(script) == "echo ready"
+
+
+def test_scripts_validate_and_validate_before_saving(tmp_path: Path) -> None:
+    vault = Vault.create(tmp_path / "validate.vault", "test-pass")
+    service = McpToolService(SessionManager(vault), vault)
+    access = McpAccess(mode="stdio")
+
+    ready = service.scripts_validate(
+        access,
+        body="echo {{token}}",
+        parameters=[
+            {
+                "name": "token",
+                "required": True,
+                "default": "sensitive-default",
+            }
+        ],
+        params={"token": "sensitive-input"},
+    )
+    assert ready["valid"] is True
+    assert ready["ready_to_run"] is True
+    assert "sensitive-default" not in str(ready)
+    assert "sensitive-input" not in str(ready)
+
+    script = service.scripts_create(
+        access,
+        name="valid",
+        body="echo {{iface}}",
+        parameters=[{"name": "iface", "required": True}],
+    )
+    before = vault.get_script_by_name("valid")
+
+    with pytest.raises(McpToolError) as create_error:
+        service.scripts_create(
+            access,
+            name="invalid",
+            body="echo {{missing}}",
+        )
+    assert create_error.value.code == "invalid_args"
+    assert [item.name for item in vault.list_scripts()] == ["valid"]
+
+    with pytest.raises(McpToolError) as malformed_error:
+        service.scripts_create(
+            access,
+            name="malformed",
+            body="echo {{iface",
+            parameters=[{"name": "iface", "required": True}],
+        )
+    assert malformed_error.value.code == "invalid_args"
+    assert [item.name for item in vault.list_scripts()] == ["valid"]
+
+    with pytest.raises(McpToolError) as update_error:
+        service.scripts_update(
+            access,
+            id=script["id"],
+            body="echo {{new_iface}}",
+        )
+    assert update_error.value.code == "invalid_args"
+    assert vault.get_script(before.id).body == before.body
+
+    updated = service.scripts_update(
+        access,
+        id=script["id"],
+        body="echo {{new_iface}}",
+        parameters=[{"name": "new_iface", "required": True}],
+    )
+    assert updated["body"] == "echo {{new_iface}}"
+    assert updated["parameters"][0]["name"] == "new_iface"
 
 
 def test_render_user_values() -> None:

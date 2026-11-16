@@ -216,6 +216,46 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 
 Выход: полная карточка включая `body`; в `parameters` нет `user_value`.
 
+### scripts_validate
+
+Read-only preflight для draft скрипта. Ничего не сохраняет, не рендерит shell
+текст и не пишет в PTY.
+
+Вход:
+
+```json
+{
+  "body": "echo {{iface}}",
+  "parameters": [
+    { "name": "iface", "required": true }
+  ],
+  "params": { "iface": "eth0" }
+}
+```
+
+`parameters` и `params` необязательны. Значения из `params` используются только
+для определения готовности к рендерингу и никогда не возвращаются.
+
+Выход:
+
+```json
+{
+  "valid": true,
+  "ready_to_run": true,
+  "placeholders": [{ "name": "iface", "position": 5 }],
+  "errors": [],
+  "warnings": [],
+  "missing_parameters": []
+}
+```
+
+`position` — нулевое смещение в символах. `valid` означает, что синтаксис
+placeholders и их объявления согласованы; `ready_to_run` также учитывает
+отсутствующие значения. `missing_parameters` содержит используемые в body
+placeholders, для которых не передано значение и не задан default; `warnings`
+включает объявленные, но неиспользуемые параметры. Ответ не содержит body,
+defaults или переданных значений.
+
 ### scripts_create / scripts_update
 
 Вход: поля Script + опционально `host_id`, `group_id`.  
@@ -223,7 +263,10 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 Update — по `id` или `name` (+ `host_id` при неоднозначности).  
 Входящий `user_value` в parameters **игнорируется**; при update существующие `user_value` по совпавшему `name` сохраняются.
 
-Без approve.
+Перед записью проверяются placeholder-синтаксис, имена параметров и наличие
+объявления для каждого placeholder; несовместимое обновление не меняет
+сохранённый скрипт. Неиспользуемые объявления допустимы и возвращаются в
+`scripts_validate` как предупреждения. Без Approve.
 
 ### scripts_delete
 
@@ -274,8 +317,8 @@ Create всегда ставит `mcp_enabled=true` (параметра нет).
 | `not_found` | Нет сессии/скрипта в scope |
 | `disconnected` | SSH/PTY не live |
 | `approve_required` | Approve выкл — write/run запрещены |
-| `invalid_args` | Валидация входа |
-| `missing_param` | Нет обязательного параметра скрипта |
+| `invalid_args` | Валидация входа; при сохранении скрипта — некорректный placeholder или объявления параметров |
+| `missing_param` | Нет значения для используемого placeholder |
 | `unknown_placeholder` | В body остался незакрытый/неизвестный `{{...}}` |
 
 ## Чего нет в v1

@@ -10,7 +10,7 @@ from uuid import UUID
 
 from hostskeeper.mcp.app_key import keys_match
 from hostskeeper.mcp.errors import McpToolError
-from hostskeeper.mcp.scripts_render import render_script
+from hostskeeper.mcp.scripts_render import analyze_script, render_script
 from hostskeeper.session.manager import (
     McpClientBusyError,
     McpUnauthorizedError,
@@ -357,6 +357,25 @@ class McpToolService:
         script = self._find_script(access, id=id, name=name, host_id=host_id)
         return script.to_mcp_dict()
 
+    def scripts_validate(
+        self,
+        access: McpAccess,
+        *,
+        body: str,
+        parameters: list[dict[str, Any]] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        """Validate a script draft without saving, rendering, or writing to a PTY."""
+        self._assert_access(access)
+        try:
+            parsed_parameters = [
+                ScriptParameter.from_mcp_dict(parameter)
+                for parameter in (parameters or [])
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise McpToolError("invalid_args", "invalid script parameters") from exc
+        return analyze_script(body, parsed_parameters, params).to_dict()
+
     def scripts_create(
         self,
         access: McpAccess,
@@ -398,6 +417,7 @@ class McpToolService:
             host_id=resolved_host,
             group_id=resolved_group,
         )
+        self._validate_script_placeholders(script)
         try:
             stored = self._vault.add_script(script)
         except ValidationError as exc:
@@ -438,12 +458,38 @@ class McpToolService:
             ]
         if group_id is not None:
             script.group_id = UUID(group_id) if group_id else None
+        self._validate_script_placeholders(script)
         try:
             stored = self._vault.update_script(script)
         except (ValidationError, ValueError) as exc:
             raise McpToolError("invalid_args", str(exc)) from exc
         self._notify_vault_changed()
         return stored.to_mcp_dict()
+
+    @staticmethod
+    def _validate_script_placeholders(script: Script) -> None:
+        analysis = analyze_script(script.body, script.parameters)
+        if not analysis.errors:
+            return
+        details = []
+        for issue in analysis.errors:
+            if issue.code == "unknown_placeholder":
+                details.append(
+                    f"unknown placeholder {issue.name} at position {issue.position}"
+                )
+            elif issue.code == "malformed_placeholder":
+                details.append(
+                    f"malformed placeholder at position {issue.position}"
+                )
+            elif issue.code == "invalid_parameter_name":
+                details.append(
+                    f"invalid parameter name at index {issue.parameter_index}"
+                )
+            else:
+                details.append(
+                    f"duplicate parameter at index {issue.parameter_index}"
+                )
+        raise McpToolError("invalid_args", "; ".join(details))
 
     def scripts_delete(
         self,
