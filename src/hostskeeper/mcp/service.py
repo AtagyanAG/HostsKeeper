@@ -25,6 +25,10 @@ from hostskeeper.vault.store import Vault
 
 AccessMode = Literal["stdio", "http"]
 _UNSET = object()
+_SCRIPT_NOT_FOUND_MESSAGE = (
+    "script not found or not visible to this client; refresh scripts_list. "
+    "Host scripts require an MCP-enabled open tab for that host."
+)
 
 
 @dataclass
@@ -907,9 +911,9 @@ class McpToolService:
             try:
                 script = self._vault.get_script(UUID(id))
             except (ValueError, NotFoundError) as exc:
-                raise McpToolError("not_found", "script not found") from exc
+                raise McpToolError("not_found", _SCRIPT_NOT_FOUND_MESSAGE) from exc
             if not self._script_visible(access, script):
-                raise McpToolError("not_found", "script not found")
+                raise McpToolError("not_found", _SCRIPT_NOT_FOUND_MESSAGE)
             return script
         if name:
             if resolved_host is not _UNSET:
@@ -918,9 +922,11 @@ class McpToolService:
                         name, host_id=resolved_host  # type: ignore[arg-type]
                     )
                 except NotFoundError as exc:
-                    raise McpToolError("not_found", "script not found") from exc
+                    raise McpToolError(
+                        "not_found", _SCRIPT_NOT_FOUND_MESSAGE
+                    ) from exc
                 if not self._script_visible(access, script):
-                    raise McpToolError("not_found", "script not found")
+                    raise McpToolError("not_found", _SCRIPT_NOT_FOUND_MESSAGE)
                 return script
             matches = [
                 s
@@ -930,7 +936,7 @@ class McpToolService:
             if len(matches) == 1:
                 return matches[0]
             if not matches:
-                raise McpToolError("not_found", "script not found")
+                raise McpToolError("not_found", _SCRIPT_NOT_FOUND_MESSAGE)
             raise McpToolError(
                 "invalid_args",
                 "ambiguous script name; pass id or host_id",

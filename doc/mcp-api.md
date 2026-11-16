@@ -215,6 +215,9 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 Вход: `{ "id"?, "name"?, "host_id"? }` — `host_id` для однозначности имени host-скрипта.
 
 Выход: полная карточка включая `body`; в `parameters` нет `user_value`.
+При `not_found` обновите `scripts_list`: host-скрипт виден только при открытой
+MCP-вкладке этого хоста. Отсутствующий и недоступный по scope скрипты намеренно
+неразличимы.
 
 ### scripts_validate
 
@@ -314,7 +317,7 @@ Create всегда ставит `mcp_enabled=true` (параметра нет).
 |------|--------|
 | `unauthorized` | Нет/неверный app key или tab token (HTTP) |
 | `client_busy` | Слот клиента на legacy token занят |
-| `not_found` | Нет сессии/скрипта в scope |
+| `not_found` | Нет сессии/скрипта в scope. Для скрипта обновите `scripts_list`; host-скрипты требуют открытой MCP-вкладки своего хоста |
 | `disconnected` | SSH/PTY не live |
 | `approve_required` | Approve выкл — write/run запрещены |
 | `invalid_args` | Валидация входа; при сохранении скрипта — некорректный placeholder или объявления параметров |

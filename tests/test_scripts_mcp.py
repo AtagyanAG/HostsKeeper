@@ -289,9 +289,13 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
 ) -> None:
     vault = Vault.create(tmp_path / "duplicate.vault", "test-pass")
     host = vault.add_host(Host(name="lab"))
+    hidden_host = vault.add_host(Host(name="hidden"))
     template = vault.add_script(Script(name="deploy", body="echo template"))
     host_script = vault.add_script(
         Script(name="deploy", body="echo host", host_id=host.id)
+    )
+    hidden_script = vault.add_script(
+        Script(name="private", body="echo hidden", host_id=hidden_host.id)
     )
     sessions = SessionManager(vault)
     session = SessionInfo(
@@ -304,9 +308,9 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
         target=SessionTarget.TAB,
         mcp_enabled=True,
     )
-    sessions.list_mcp_sessions = lambda: [session]
+    sessions.resolve_mcp_token = lambda token: session
     service = McpToolService(sessions, vault)
-    access = McpAccess(mode="stdio")
+    access = McpAccess(mode="http", token="tab-token")
 
     listed = service.scripts_list(access)["scripts"]
     by_id = {entry["id"]: entry for entry in listed}
@@ -314,13 +318,24 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
     assert by_id[str(template.id)]["host_alias"] is None
     assert by_id[str(host_script.id)]["scope"] == "host"
     assert by_id[str(host_script.id)]["host_alias"] == "lab-user-1"
+    assert str(hidden_script.id) not in by_id
+    for entry in listed:
+        assert service.scripts_get(access, id=entry["id"])["id"] == entry["id"]
 
     with pytest.raises(McpToolError, match="ambiguous script name") as exc:
         service.scripts_get(access, name="deploy")
     assert exc.value.code == "invalid_args"
-    assert service.scripts_get(access, id=str(host_script.id))["id"] == str(
-        host_script.id
-    )
+
+    unavailable_messages = []
+    for script_id in (str(hidden_script.id), str(uuid4())):
+        with pytest.raises(McpToolError) as unavailable:
+            service.scripts_get(access, id=script_id)
+        assert unavailable.value.code == "not_found"
+        unavailable_messages.append(str(unavailable.value))
+    assert unavailable_messages[0] == unavailable_messages[1]
+    assert "refresh scripts_list" in unavailable_messages[0]
+    assert "MCP-enabled open tab" in unavailable_messages[0]
+    assert str(hidden_script.id) not in unavailable_messages[0]
 
 
 @pytest.mark.skipif(
