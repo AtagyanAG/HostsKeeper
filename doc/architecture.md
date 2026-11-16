@@ -71,9 +71,9 @@
 
 | Канал | Bind / запуск | Auth | Видимость |
 |-------|---------------|------|-----------|
-| HTTP gateway | LAN (и localhost) | стабильный app key (`?key=` / заголовок) | все mcp-enabled вкладки + скрипты |
-| HTTP legacy | LAN (и localhost) | per-tab token в URL | одна вкладка + все скрипты |
-| stdio | процесс MCP | доверенный локальный | все MCP-вкладки + все скрипты |
+| HTTP gateway | LAN (и localhost) | стабильный app key (`?key=` / заголовок) | все mcp-enabled вкладки + MCP-enabled скрипты в доступном host scope |
+| HTTP legacy | LAN (и localhost) | per-tab token в URL | одна вкладка + MCP-enabled скрипты в доступном host scope |
+| stdio | процесс MCP | доверенный локальный | все MCP-вкладки + MCP-enabled скрипты в доступном host scope |
 
 Ограничение legacy: **1 клиент на tab-token**. Gateway: выбор вкладки через `alias` / `session_attach`.
 

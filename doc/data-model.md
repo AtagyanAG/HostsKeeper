@@ -104,7 +104,10 @@ Session (runtime, не в vault):
 | parameters | Parameter[] | Описание подстановок |
 | group_id | UUID? | Папка (тот же scope `host_id`, что у Script) |
 | host_id | UUID? | `null` = шаблон; иначе скрипт хоста |
+| mcp_enabled | bool | UI-чекбокс MCP; default false для новых UI-скриптов; legacy-скрипты без поля сохраняют видимость (true) |
 | created_at / updated_at | datetime | |
+
+MCP видит только скрипты с `mcp_enabled=true`: шаблоны доступны всегда, host-local — только при открытой MCP-вкладке этого хоста. Скрипты, созданные через MCP, сразу получают `mcp_enabled=true`; `scripts_update` не меняет этот флаг.
 
 Удаление Host каскадно удаляет его Address/Credential/Script/Note и host-группы Scripts.
 

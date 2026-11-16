@@ -266,7 +266,7 @@ class HostScriptsPanel(QWidget):
             self._vault.list_scripts(host_id=host_id), key=lambda s: s.name.lower()
         ):
             item = QTreeWidgetItem([script.name])
-            item.setIcon(0, script_icon())
+            item.setIcon(0, script_icon(mcp_enabled=script.mcp_enabled))
             item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -539,7 +539,7 @@ class HostScriptsPanel(QWidget):
         act_group.triggered.connect(self._add_group)
         act_script = new_menu.addAction(script_icon(), "Script")
         act_script.triggered.connect(self._add_script)
-        act_note = new_menu.addAction(note_icon(), "Note")
+        act_note = new_menu.addAction(note_icon(mcp_enabled=True), "Note")
         act_note.triggered.connect(self._add_note)
         if payload:
             menu.addSeparator()
@@ -645,6 +645,7 @@ class HostScriptsPanel(QWidget):
                 parameters=list(src.parameters),
                 group_id=dest_group,
                 host_id=self._host_id,
+                mcp_enabled=src.mcp_enabled,
             )
         )
 
@@ -699,5 +700,6 @@ class HostScriptsPanel(QWidget):
                     parameters=list(script.parameters),
                     group_id=new_gid,
                     host_id=self._host_id,
+                    mcp_enabled=script.mcp_enabled,
                 )
             )

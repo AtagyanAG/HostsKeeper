@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QTreeWidgetItem
 
 
@@ -31,8 +31,16 @@ def folder_icon(*, filled: bool) -> QIcon:
     return QIcon(pm)
 
 
+def _draw_mcp_disabled_border(painter: QPainter, *, mcp_enabled: bool) -> None:
+    if mcp_enabled:
+        return
+    painter.setPen(QPen(QColor(205, 55, 55), 1))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRect(0, 0, 15, 15)
+
+
 def note_icon(*, mcp_enabled: bool = False) -> QIcon:
-    """16×16 document leaf; slightly bluer when MCP-enabled."""
+    """16×16 document leaf; disabled MCP visibility has a thin red frame."""
     size = 16
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
@@ -50,6 +58,7 @@ def note_icon(*, mcp_enabled: bool = False) -> QIcon:
     painter.drawLine(5, 5, 11, 5)
     painter.drawLine(5, 8, 11, 8)
     painter.drawLine(5, 11, 9, 11)
+    _draw_mcp_disabled_border(painter, mcp_enabled=mcp_enabled)
     painter.end()
     return QIcon(pm)
 
@@ -75,8 +84,8 @@ def host_icon() -> QIcon:
     return QIcon(pm)
 
 
-def script_icon() -> QIcon:
-    """16×16 shell/script glyph."""
+def script_icon(*, mcp_enabled: bool = True) -> QIcon:
+    """16×16 shell/script glyph; disabled MCP visibility has a thin red frame."""
     size = 16
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
@@ -90,6 +99,7 @@ def script_icon() -> QIcon:
     painter.drawLine(5, 5, 7, 7)
     painter.drawLine(7, 7, 5, 9)
     painter.drawLine(8, 11, 11, 11)
+    _draw_mcp_disabled_border(painter, mcp_enabled=mcp_enabled)
     painter.end()
     return QIcon(pm)
 

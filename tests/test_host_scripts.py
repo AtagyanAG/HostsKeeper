@@ -44,8 +44,12 @@ def test_delete_host_cascades_scripts_and_groups(tmp_path: Path) -> None:
 def test_mcp_host_script_visibility_without_tab(tmp_path: Path) -> None:
     vault = Vault.create(tmp_path / "m.vault", "pw")
     host = vault.add_host(Host(name="h"))
-    vault.add_script(Script(name="tpl", body="echo t", host_id=None))
-    vault.add_script(Script(name="local", body="echo h", host_id=host.id))
+    vault.add_script(
+        Script(name="tpl", body="echo t", host_id=None, mcp_enabled=True)
+    )
+    vault.add_script(
+        Script(name="local", body="echo h", host_id=host.id, mcp_enabled=True)
+    )
     sessions = SessionManager(vault)
     service = McpToolService(sessions, vault)
     stdio = McpAccess(mode="stdio")

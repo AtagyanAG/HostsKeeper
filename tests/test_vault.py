@@ -249,6 +249,36 @@ def test_notes_crud_and_group_cascade(tmp_path: Path) -> None:
     assert again.list_groups() == []
 
 
+def test_legacy_script_without_mcp_flag_remains_visible() -> None:
+    from hostskeeper.vault import Script
+
+    script = Script(name="legacy", body="echo legacy", mcp_enabled=False)
+    legacy_data = script.to_dict()
+    legacy_data.pop("mcp_enabled")
+
+    assert Script.from_dict(legacy_data).mcp_enabled is True
+
+
+def test_script_mcp_visibility_persists(tmp_path: Path) -> None:
+    from hostskeeper.vault import Script
+
+    path = tmp_path / "script-visibility.vault"
+    vault = Vault.create(path, "pw")
+    hidden = vault.add_script(
+        Script(name="hidden", body="echo hidden", mcp_enabled=False)
+    )
+    visible = vault.add_script(
+        Script(name="visible", body="echo visible", mcp_enabled=True)
+    )
+
+    vault.lock()
+    reloaded = Vault(path)
+    reloaded.unlock("pw")
+
+    assert reloaded.get_script(hidden.id).mcp_enabled is False
+    assert reloaded.get_script(visible.id).mcp_enabled is True
+
+
 def test_host_notes_preview_persists(tmp_path: Path) -> None:
     path = tmp_path / "hp.vault"
     vault = Vault.create(path, "pw")

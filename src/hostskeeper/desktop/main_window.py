@@ -204,24 +204,36 @@ class MainWindow(QMainWindow):
         vaults_layout.addWidget(self._vault_tree)
         left_split.addWidget(vaults_wrap)
 
-        hosts_wrap = QWidget()
-        hosts_layout = QVBoxLayout(hosts_wrap)
-        hosts_layout.setContentsMargins(4, 0, 4, 4)
+        workspace_wrap = QWidget()
+        workspace_layout = QVBoxLayout(workspace_wrap)
+        workspace_layout.setContentsMargins(4, 0, 4, 4)
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search hosts / scripts / notes…")
         self._search.textChanged.connect(self._apply_filter)
-        hosts_layout.addWidget(self._search)
+        workspace_layout.addWidget(self._search)
 
-        self._tree = DropTreeWidget()
-        self._tree.setHeaderLabel("Workspace")
-        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._tree.customContextMenuRequested.connect(self._tree_menu)
-        self._tree.itemDoubleClicked.connect(self._tree_double_click)
-        self._tree.itemSelectionChanged.connect(self._on_tree_selection)
-        self._tree.reparent_requested.connect(self._on_workspace_reparent)
-        self._tree.foreign_drop_requested.connect(self._on_workspace_foreign_drop)
-        self._tree.itemExpanded.connect(self._on_workspace_item_expanded)
-        self._tree.itemCollapsed.connect(self._on_workspace_item_collapsed)
+        self._workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._workspace_splitter.setObjectName("workspaceTreeSplitter")
+        self._workspace_splitter.setHandleWidth(4)
+        self._workspace_splitter.setChildrenCollapsible(False)
+
+        hosts_wrap = QWidget()
+        hosts_layout = QVBoxLayout(hosts_wrap)
+        hosts_layout.setContentsMargins(0, 0, 0, 0)
+        self._hosts_tree = DropTreeWidget()
+        self._hosts_tree.setHeaderHidden(True)
+        self._hosts_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._hosts_tree.customContextMenuRequested.connect(
+            lambda pos: self._tree_menu(self._hosts_tree, pos)
+        )
+        self._hosts_tree.itemDoubleClicked.connect(self._tree_double_click)
+        self._hosts_tree.itemSelectionChanged.connect(self._on_tree_selection)
+        self._hosts_tree.reparent_requested.connect(self._on_workspace_reparent)
+        self._hosts_tree.foreign_drop_requested.connect(
+            self._on_workspace_foreign_drop
+        )
+        self._hosts_tree.itemExpanded.connect(self._on_workspace_item_expanded)
+        self._hosts_tree.itemCollapsed.connect(self._on_workspace_item_collapsed)
         self._hosts_root = QTreeWidgetItem(["Hosts"])
         self._hosts_root.setData(0, Qt.ItemDataRole.UserRole, {"kind": NodeKind.HOSTS_ROOT})
         self._hosts_root.setFlags(
@@ -229,6 +241,28 @@ class MainWindow(QMainWindow):
             | Qt.ItemFlag.ItemIsSelectable
             | Qt.ItemFlag.ItemIsDropEnabled
         )
+        self._hosts_tree.addTopLevelItem(self._hosts_root)
+        self._hosts_root.setExpanded(True)
+        hosts_layout.addWidget(self._hosts_tree)
+        self._workspace_splitter.addWidget(hosts_wrap)
+
+        scripts_wrap = QWidget()
+        scripts_layout = QVBoxLayout(scripts_wrap)
+        scripts_layout.setContentsMargins(0, 0, 0, 0)
+        self._scripts_tree = DropTreeWidget()
+        self._scripts_tree.setHeaderHidden(True)
+        self._scripts_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._scripts_tree.customContextMenuRequested.connect(
+            lambda pos: self._tree_menu(self._scripts_tree, pos)
+        )
+        self._scripts_tree.itemDoubleClicked.connect(self._tree_double_click)
+        self._scripts_tree.itemSelectionChanged.connect(self._on_tree_selection)
+        self._scripts_tree.reparent_requested.connect(self._on_workspace_reparent)
+        self._scripts_tree.foreign_drop_requested.connect(
+            self._on_workspace_foreign_drop
+        )
+        self._scripts_tree.itemExpanded.connect(self._on_workspace_item_expanded)
+        self._scripts_tree.itemCollapsed.connect(self._on_workspace_item_collapsed)
         self._scripts_root = QTreeWidgetItem(["Scripts"])
         self._scripts_root.setData(
             0, Qt.ItemDataRole.UserRole, {"kind": NodeKind.SCRIPTS_ROOT}
@@ -238,12 +272,15 @@ class MainWindow(QMainWindow):
             | Qt.ItemFlag.ItemIsSelectable
             | Qt.ItemFlag.ItemIsDropEnabled
         )
-        self._tree.addTopLevelItem(self._hosts_root)
-        self._tree.addTopLevelItem(self._scripts_root)
-        self._hosts_root.setExpanded(True)
+        self._scripts_tree.addTopLevelItem(self._scripts_root)
         self._scripts_root.setExpanded(True)
-        hosts_layout.addWidget(self._tree)
-        left_split.addWidget(hosts_wrap)
+        scripts_layout.addWidget(self._scripts_tree)
+        self._workspace_splitter.addWidget(scripts_wrap)
+        self._workspace_splitter.setStretchFactor(0, 3)
+        self._workspace_splitter.setStretchFactor(1, 1)
+        self._workspace_splitter.setSizes([300, 100])
+        workspace_layout.addWidget(self._workspace_splitter)
+        left_split.addWidget(workspace_wrap)
 
         left_split.setStretchFactor(0, 1)
         left_split.setStretchFactor(1, 3)
@@ -935,7 +972,7 @@ class MainWindow(QMainWindow):
             vault.list_scripts(only_templates=True), key=lambda s: s.name.lower()
         ):
             item = QTreeWidgetItem([script.name])
-            item.setIcon(0, script_icon())
+            item.setIcon(0, script_icon(mcp_enabled=script.mcp_enabled))
             item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -1033,7 +1070,10 @@ class MainWindow(QMainWindow):
                     return found
             return None
 
-        for root in (self._hosts_root, self._scripts_root):
+        for root, tree in (
+            (self._hosts_root, self._hosts_tree),
+            (self._scripts_root, self._scripts_tree),
+        ):
             found = walk(root)
             if found is None:
                 continue
@@ -1045,8 +1085,8 @@ class MainWindow(QMainWindow):
                     parent = parent.parent()
             finally:
                 self._suppress_expand_persist = False
-            self._tree.setCurrentItem(found)
-            self._tree.scrollToItem(found)
+            tree.setCurrentItem(found)
+            tree.scrollToItem(found)
             return True
         return False
 
@@ -1159,16 +1199,18 @@ class MainWindow(QMainWindow):
                 id=group_id,
             )
 
-    def _tree_menu(self, pos) -> None:
+    def _tree_menu(self, tree: DropTreeWidget, pos) -> None:
         if not self._state.unlocked:
             return
-        item = self._tree.itemAt(pos)
+        item = tree.itemAt(pos)
         node = self._node(item) if item is not None else None
         menu = QMenu(self)
-        # Empty viewport (below items) → same as Scripts root.
         if node is None:
-            self._fill_scripts_root_menu(menu)
-            menu.exec(self._tree.viewport().mapToGlobal(pos))
+            if tree is self._hosts_tree:
+                self._fill_hosts_new_menu(menu, group_id=None)
+            else:
+                self._fill_scripts_root_menu(menu)
+            menu.exec(tree.viewport().mapToGlobal(pos))
             return
         kind = node.get("kind")
         if kind == NodeKind.HOSTS_ROOT:
@@ -1207,7 +1249,7 @@ class MainWindow(QMainWindow):
             menu.addAction("Edit", lambda: self._edit_note(node["id"]))
             menu.addAction("Delete", lambda: self._delete_note(node["id"]))
         if not menu.isEmpty():
-            menu.exec(self._tree.viewport().mapToGlobal(pos))
+            menu.exec(tree.viewport().mapToGlobal(pos))
 
     def _fill_hosts_new_menu(
         self, menu: QMenu, *, group_id: UUID | None
@@ -1230,7 +1272,7 @@ class MainWindow(QMainWindow):
         )
         act_script = new_menu.addAction(script_icon(), "Script")
         act_script.triggered.connect(lambda: self._new_script(group_id=group_id))
-        act_note = new_menu.addAction(note_icon(), "Note")
+        act_note = new_menu.addAction(note_icon(mcp_enabled=True), "Note")
         act_note.triggered.connect(lambda: self._new_note(group_id=group_id))
 
     def _fill_scripts_root_menu(self, menu: QMenu) -> None:
@@ -1634,7 +1676,9 @@ class MainWindow(QMainWindow):
     def _on_tree_selection(self) -> None:
         if not self._state.unlocked:
             return
-        items = self._tree.selectedItems()
+        if self.sender() is self._scripts_tree:
+            return
+        items = self._hosts_tree.selectedItems()
         if not items:
             return
         node = self._node(items[0])
@@ -1886,6 +1930,7 @@ class MainWindow(QMainWindow):
                         parameters=list(src.parameters),
                         group_id=dest_group,
                         host_id=None,
+                        mcp_enabled=src.mcp_enabled,
                     )
                 )
             elif kind == "group":
@@ -1953,6 +1998,7 @@ class MainWindow(QMainWindow):
                     parameters=list(script.parameters),
                     group_id=new_gid,
                     host_id=None,
+                    mcp_enabled=script.mcp_enabled,
                 )
             )
 

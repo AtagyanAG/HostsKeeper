@@ -293,9 +293,10 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     def scripts_list() -> dict[str, Any]:
         """List scripts visible to this client.
 
-        Each entry has an id, name, host_id (null for a template), parameters,
-        tags, and group_id. Use the id to disambiguate same-name scripts, then
-        call scripts_get to inspect a script body.
+        Lists MCP-enabled scripts in the client's host scope. Each entry has an
+        id, name, host_id (null for a template), parameters, tags, group_id,
+        and mcp_enabled. Use the id to disambiguate same-name scripts, then call
+        scripts_get.
         """
         try:
             return service.scripts_list(get_access())
@@ -310,8 +311,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     ) -> dict[str, Any]:
         """Read a script and its shell body.
 
-        Identify by id, or by name and optionally host_id. Host-bound scripts
-        are visible only while an MCP-enabled tab for that host is open.
+        Identify by id, or by name and optionally host_id. Scripts must have
+        MCP enabled; host-bound scripts also require an MCP-enabled tab for
+        that host.
         """
         try:
             return service.scripts_get(
@@ -385,7 +387,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         """Create a reusable script template or host-bound script.
 
         Omit host_id for a template. A host-bound script requires an MCP-enabled
-        open tab on that host. Creating or editing scripts does not require Approve.
+        open tab on that host. MCP-created scripts are immediately visible to MCP.
+        Creating or editing scripts does not require Approve.
         """
         try:
             return service.scripts_create(
@@ -419,7 +422,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         """Update selected script fields without requiring Approve.
 
         Identify by id, or by name and host_id when needed. Omitted fields are
-        unchanged; supplied tags/parameters replace their current lists.
+        unchanged; supplied tags/parameters replace their current lists. This
+        tool does not change MCP visibility.
         """
         try:
             return service.scripts_update(

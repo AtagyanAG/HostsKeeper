@@ -76,7 +76,7 @@ class DropTreeWidget(QTreeWidget):
         self.setRootIsDecorated(True)
         self.setUniformRowHeights(True)
         self.setIndentation(18)
-        self.setStyle(_TreeGuideStyle(self.style()))
+        self.setStyle(_TreeGuideStyle())
 
     def mimeTypes(self) -> list[str]:  # noqa: N802
         return [HOSTSKEEPER_NODE_MIME, _LEGACY_NODE_MIME, *super().mimeTypes()]

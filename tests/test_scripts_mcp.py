@@ -225,6 +225,7 @@ def test_mcp_redacts_and_preserves_user_value(tmp_path: Path) -> None:
         Script(
             name="say",
             body="echo {{tag}}",
+            mcp_enabled=True,
             parameters=[
                 ScriptParameter(
                     name="tag",
@@ -290,11 +291,14 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
     vault = Vault.create(tmp_path / "duplicate.vault", "test-pass")
     host = vault.add_host(Host(name="lab"))
     hidden_host = vault.add_host(Host(name="hidden"))
-    template = vault.add_script(Script(name="deploy", body="echo template"))
+    template = vault.add_script(
+        Script(name="deploy", body="echo template", mcp_enabled=True)
+    )
     host_script = vault.add_script(
         Script(
             name="deploy",
             body="echo host",
+            mcp_enabled=True,
             description="host-specific deployment",
             parameters=[
                 ScriptParameter(
@@ -307,7 +311,12 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
         )
     )
     hidden_script = vault.add_script(
-        Script(name="private", body="echo hidden", host_id=hidden_host.id)
+        Script(
+            name="private",
+            body="echo hidden",
+            host_id=hidden_host.id,
+            mcp_enabled=True,
+        )
     )
     sessions = SessionManager(vault)
     session = SessionInfo(
@@ -387,8 +396,12 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
 
 def test_scripts_compare_bounds_body_diff(tmp_path: Path) -> None:
     vault = Vault.create(tmp_path / "compare-large.vault", "test-pass")
-    left = vault.add_script(Script(name="left", body=("left line\n" * 2500)))
-    right = vault.add_script(Script(name="right", body=("right line\n" * 2500)))
+    left = vault.add_script(
+        Script(name="left", body=("left line\n" * 2500), mcp_enabled=True)
+    )
+    right = vault.add_script(
+        Script(name="right", body=("right line\n" * 2500), mcp_enabled=True)
+    )
     service = McpToolService(SessionManager(vault), vault)
 
     compared = service.scripts_compare(
@@ -400,6 +413,51 @@ def test_scripts_compare_bounds_body_diff(tmp_path: Path) -> None:
     assert compared["body_diff_truncated"] is True
     assert len(compared["body_diff"]) <= 20_000
     assert "diff truncated" in compared["body_diff"]
+
+
+def test_scripts_visibility_flag_gates_mcp_access(tmp_path: Path) -> None:
+    vault = Vault.create(tmp_path / "visibility.vault", "test-pass")
+    hidden = vault.add_script(
+        Script(name="private", body="echo private", mcp_enabled=False)
+    )
+    visible = vault.add_script(
+        Script(name="public", body="echo public", mcp_enabled=True)
+    )
+    service = McpToolService(SessionManager(vault), vault)
+    access = McpAccess(mode="stdio")
+
+    listed = service.scripts_list(access)["scripts"]
+    assert [script["id"] for script in listed] == [str(visible.id)]
+    assert listed[0]["mcp_enabled"] is True
+
+    with pytest.raises(McpToolError) as get_error:
+        service.scripts_get(access, id=str(hidden.id))
+    assert get_error.value.code == "not_found"
+
+    with pytest.raises(McpToolError) as compare_error:
+        service.scripts_compare(
+            access,
+            left_script_id=str(hidden.id),
+            right_script_id=str(visible.id),
+        )
+    assert compare_error.value.code == "not_found"
+
+    with pytest.raises(McpToolError) as update_error:
+        service.scripts_update(access, id=str(hidden.id), new_name="renamed")
+    assert update_error.value.code == "not_found"
+
+    with pytest.raises(McpToolError) as run_error:
+        service.scripts_run(access, script_id=str(hidden.id))
+    assert run_error.value.code == "not_found"
+
+    with pytest.raises(McpToolError) as delete_error:
+        service.scripts_delete(access, id=str(hidden.id))
+    assert delete_error.value.code == "not_found"
+    assert vault.get_script(hidden.id).name == "private"
+
+    created = service.scripts_create(access, name="from-mcp", body="echo ok")
+    assert created["mcp_enabled"] is True
+    assert vault.get_script_by_name("from-mcp").mcp_enabled is True
 
 
 @pytest.mark.skipif(

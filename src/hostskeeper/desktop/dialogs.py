@@ -115,7 +115,7 @@ class HostDialog(QDialog):
         self._on_winscp = on_winscp
         self._on_run_script = on_run_script
         self._list_host_sessions = list_host_sessions
-        self.setWindowTitle("Edit Host" if host else "New Host")
+        self.setWindowTitle(host.name if host else "New Host")
         self._name = QLineEdit(host.name if host else "")
         self._description = QLineEdit(host.description or "" if host else "")
         self._tags = QLineEdit(_tags_to_text(host.tags) if host else "")
@@ -1232,6 +1232,12 @@ class ScriptDialog(QDialog):
             script.host_id if script is not None else host_id
         )
         self.setWindowTitle("Edit Script" if script else "New Script")
+        self._mcp = QCheckBox("MCP")
+        self._mcp.setToolTip(
+            "When checked, this script is available via MCP. "
+            "Host scripts also require an open MCP-enabled tab for that host."
+        )
+        self._mcp.setChecked(bool(script.mcp_enabled) if script else False)
         self._name = QLineEdit(script.name if script else "")
         self._description = QLineEdit(script.description or "" if script else "")
         self._tags = QLineEdit(_tags_to_text(script.tags) if script else "")
@@ -1286,7 +1292,11 @@ class ScriptDialog(QDialog):
             script.created_at if script is not None else None,
             script.updated_at if script is not None else None,
         )
-        layout.addWidget(self._ts_label)
+        metadata_row = QHBoxLayout()
+        metadata_row.addWidget(self._ts_label)
+        metadata_row.addStretch(1)
+        metadata_row.addWidget(self._mcp)
+        layout.addLayout(metadata_row)
         layout.addLayout(form)
         layout.addWidget(splitter, stretch=1)
         layout.addWidget(buttons)
@@ -1316,6 +1326,7 @@ class ScriptDialog(QDialog):
             return
         self._script = script
         self._name.setText(script.name)
+        self._mcp.setChecked(bool(script.mcp_enabled))
         self._description.setText(script.description or "")
         self._tags.setText(_tags_to_text(script.tags))
         self._body.setPlainText(script.body)
@@ -1330,7 +1341,6 @@ class ScriptDialog(QDialog):
             f"Created: {_format_ts(script.created_at)}    "
             f"Modified: {_format_ts(script.updated_at)}"
         )
-        self.setWindowTitle("Edit Script")
 
     def _save(self) -> None:
         name = self._name.text().strip()
@@ -1371,6 +1381,7 @@ class ScriptDialog(QDialog):
                         parameters=params,
                         group_id=self._group_id,
                         host_id=self._host_id,
+                        mcp_enabled=self._mcp.isChecked(),
                     )
                 )
             else:
@@ -1380,6 +1391,7 @@ class ScriptDialog(QDialog):
                 s.description = self._description.text().strip() or None
                 s.tags = _tags_from_text(self._tags.text())
                 s.parameters = params
+                s.mcp_enabled = self._mcp.isChecked()
                 self._result = self._vault.update_script(s)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "HostsKeeper", str(exc))

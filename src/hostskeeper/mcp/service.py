@@ -330,6 +330,8 @@ class McpToolService:
             host_aliases.setdefault(session.host_id, session.alias)
         scripts = []
         for script in self._vault.list_scripts():
+            if not script.mcp_enabled:
+                continue
             if script.host_id is not None and script.host_id not in visible_hosts:
                 continue
             scripts.append(
@@ -347,6 +349,7 @@ class McpToolService:
                     "parameters": [p.to_mcp_dict() for p in script.parameters],
                     "host_id": str(script.host_id) if script.host_id else None,
                     "group_id": str(script.group_id) if script.group_id else None,
+                    "mcp_enabled": True,
                 }
             )
         return {"scripts": scripts}
@@ -482,6 +485,7 @@ class McpToolService:
             ],
             host_id=resolved_host,
             group_id=resolved_group,
+            mcp_enabled=True,
         )
         self._validate_script_placeholders(script)
         try:
@@ -885,6 +889,8 @@ class McpToolService:
             raise McpToolError("not_found", "host not found") from exc
 
     def _script_visible(self, access: McpAccess, script: Script) -> bool:
+        if not script.mcp_enabled:
+            return False
         if script.host_id is None:
             return True
         return script.host_id in self._accessible_host_ids(access)
