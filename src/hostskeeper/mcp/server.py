@@ -84,11 +84,14 @@ _INSTRUCTIONS = (
     "pass the selector to each session tool. session_info reports status and the "
     "current screen snapshot. session_read starts at the retained buffer beginning "
     "when cursor is omitted; pass its returned cursor to continue reading. "
-    "session_write and scripts_run require Approve on that session. submit=true "
-    "sends Enter; submit=false types without Enter. Use scripts_list and select a "
-    "script by id before scripts_get or scripts_run. Use scripts_validate to "
-    "check a draft before saving it. Host-bound scripts require an MCP-enabled "
-    "open tab for that host. Tool failures are returned with isError=true; use "
+    "session_write and scripts_run require Approve on that session. Success means "
+    "text was sent to the interactive PTY, not that a command completed or "
+    "succeeded; use session_read or session_subscribe to inspect shared output. "
+    "submit=true sends Enter; submit=false types without Enter. Use scripts_list "
+    "and select a script by id before scripts_get or scripts_run. "
+    "Use scripts_validate to check a draft before saving it. "
+    "Host-bound scripts require an MCP-enabled open tab for that host. "
+    "Tool failures are returned with isError=true; use "
     "the error code and message to correct the request."
 )
 
@@ -245,8 +248,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     ) -> dict[str, Any]:
         """Write text to an existing live session.
 
-        Requires Approve enabled for the selected session. The response confirms
-        the target alias; it does not wait for command completion.
+        Requires Approve enabled for the selected session. Success confirms that
+        text was sent to the PTY; it does not mean the command completed or
+        succeeded. Use session_read or session_subscribe to inspect shared output.
         """
         try:
             return service.session_write(
@@ -448,7 +452,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         Requires Approve on the target session. Select by script_id when names
         may be duplicated. Host-bound scripts can run only on a session for the
         same host. Required missing parameters or unknown placeholders fail before
-        any text is written.
+        any text is written. Success confirms the rendered text was sent to the
+        PTY; it does not report command completion or exit status. Use
+        session_read or session_subscribe to inspect shared output.
         """
         try:
             return service.scripts_run(

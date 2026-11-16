@@ -14,7 +14,7 @@ class BufferRead:
 
 
 class OutputBuffer:
-    """Append-only text buffer; cursor is decimal byte offset into UTF-8 view."""
+    """Append-only text buffer; cursor is a decimal character offset."""
 
     def __init__(self, max_chars: int = 1_000_000) -> None:
         self._lock = threading.Lock()
