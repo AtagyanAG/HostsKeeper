@@ -329,7 +329,10 @@ Update — по `id` или `name` (+ `host_id` при неоднозначно�
 
 ### scripts_run
 
-Подстановка параметров (`params` / `default`) → вставка в PTY. Поле `user_value` **не используется** (только UI Run с «Use user values» → PuTTY).  
+Текущая реализация: подстановка параметров (`params` / `default`) → вставка в
+PTY. Поле `user_value` **не используется** (только UI Run с «Use user values» →
+PuTTY). Целевой контракт после реализации плана: запуск через отдельный
+exec-channel с run lifecycle; см. следующий раздел.
 Шаблон — в любую доступную сессию. Host-скрипт — **только** в сессию того же хоста.
 
 Вход:
@@ -359,6 +362,131 @@ Update — по `id` или `name` (+ `host_id` при неоднозначно�
 `session_read` или `session_subscribe`; echo отправленного скрипта может быть
 частью этого вывода.
 
+### Целевой контракт lifecycle запуска (этап 1; ещё не реализован)
+
+Этот раздел фиксирует целевые имена и схемы для последующих этапов. До
+реализации текущий `scripts_run` выше продолжает возвращать `{ "ok": true,
+"alias": "…" }` после записи в PTY.
+
+#### scripts_run
+
+Вход сохраняет selectors скрипта/сессии и `params`, но не содержит `submit`:
+exec-запуск всегда является отдельным вызовом, а не интерактивным вводом.
+`request_id` — обязательный UUID, созданный MCP-клиентом для этого намерения.
+Видимость скрипта, host scope, live-состояние сессии и Approve проверяются до
+принятия запуска.
+
+```json
+{
+  "session_id": "uuid?",
+  "alias": "string?",
+  "script_id": "uuid?",
+  "name": "string?",
+  "host_id": "uuid?",
+  "params": { "iface": "eth0" },
+  "request_id": "uuid"
+}
+```
+
+```json
+{
+  "run_id": "uuid",
+  "state": "accepted",
+  "accepted_at": "2026-11-17T10:00:00Z"
+}
+```
+
+`accepted` подтверждает только принятие запроса HostsKeeper, не запуск или
+успешное выполнение на target host. Повтор с тем же `request_id` и сессией
+возвращает исходный run без повторного запуска, даже если остальные аргументы
+отличаются; новый запуск требует нового request id. Идемпотентность действует,
+пока запись сохранена. Run-записи живут в памяти процесса до 24 часов, максимум
+100; при заполнении лимита новые запуски отклоняются, активные записи не
+вытесняются.
+
+#### scripts_run_status / scripts_run_wait / scripts_run_cancel
+
+Все инструменты принимают `run_id`. `scripts_run_wait` дополнительно принимает
+`timeout_sec` (`30` default, `0..30`), `stdout_cursor?`, `stderr_cursor?` и
+`max_chars` (`16384` default, `1..65536` суммарно по двум потокам). Окончание
+ожидания возвращается как `wait_timed_out=true`, не меняя state. `status` не
+возвращает output; `wait` возвращает новые порции stdout/stderr; `cancel`
+запрашивает остановку и не обещает её до подтверждения.
+
+```json
+{ "run_id": "uuid" }
+```
+
+Это вход status/cancel. Вход wait:
+
+```json
+{
+  "run_id": "uuid",
+  "timeout_sec": 30,
+  "stdout_cursor": "0",
+  "stderr_cursor": "0",
+  "max_chars": 16384
+}
+```
+
+```json
+{
+  "run_id": "uuid",
+  "request_id": "uuid",
+  "session_id": "uuid",
+  "script_id": "uuid",
+  "state": "running",
+  "accepted_at": "2026-11-17T10:00:00Z",
+  "started_at": "2026-11-17T10:00:01Z",
+  "updated_at": "2026-11-17T10:00:01Z",
+  "completed_at": null,
+  "exit_code": null,
+  "error_code": null,
+  "process_may_continue": true,
+  "stdout_chars_retained": 12,
+  "stderr_chars_retained": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false
+}
+```
+
+`scripts_run_wait` также возвращает:
+
+```json
+{
+  "stdout": { "cursor": "0", "data": "ready\n", "truncated": false },
+  "stderr": { "cursor": "0", "data": "", "truncated": false },
+  "wait_timed_out": false
+}
+```
+
+States: `accepted`, `starting`, `running`, `cancel_requested`, `succeeded`,
+`failed`, `cancelled`, `session_lost`, `execution_timed_out`, `unknown`,
+`not_supported`. `succeeded` требует подтверждённого exit code 0; `failed` —
+подтверждённого ненулевого exit code. В остальных состояниях `exit_code=null`.
+`cancelled` означает подтверждённую остановку. При `session_lost` и
+`execution_timed_out` `process_may_continue=true`; эти состояния не гарантируют,
+что remote process завершён. Если timeout привёл к подтверждённой остановке,
+возвращается `state="cancelled"`, `error_code="execution_timeout"` и
+`exit_code=null`. Неподдерживаемый сценарий имеет state
+`not_supported` либо безопасную ошибку до запуска.
+
+stdout и stderr имеют отдельные cursors; текст и shell body не включаются в
+run metadata. На каждый поток удерживаются первые 131072 символа; последующий
+вывод отбрасывается и отмечается `stdout_truncated` / `stderr_truncated`.
+Внутри отдельного `stdout` / `stderr` объекта `truncated` означает, что после
+текущего chunk остаются сохранённые данные для следующего cursor. Cursors —
+десятичные смещения в символах; отсутствующий cursor равен `"0"`.
+Для одного run действует максимум 600 секунд, один активный запуск на сессию
+и восемь на процесс, до 100 записей (активные не вытесняются). При достижении
+лимита параллельности старт отклоняется с `run_capacity`, без очереди.
+
+Каждый вызов status/wait/cancel заново проверяет доступность исходной сессии в
+scope текущего MCP access. Невалидный или недоступный `run_id` возвращает общий
+`not_found`; raw token/app key не сохраняются в run record. Для этих
+read-only/stop-запросов Approve не требуется; scripts_run всегда требует
+Approve. Отзыв MCP доступа к исходной сессии блокирует доступ к её run-записям.
+
 ### groups_list / groups_create / groups_update / groups_delete
 
 Дерево групп (`kind=scripts|hosts`). Шаблонные scripts-группы всегда; host-группы — при открытой вкладке хоста.  
@@ -384,6 +512,7 @@ Create всегда ставит `mcp_enabled=true` (параметра нет).
 | `invalid_args` | Валидация входа; при сохранении скрипта — некорректный placeholder или объявления параметров |
 | `missing_param` | Нет значения для используемого placeholder |
 | `unknown_placeholder` | В body остался незакрытый/неизвестный `{{...}}` |
+| `run_capacity` | Достигнут лимит одновременных запусков; запрос не поставлен в очередь (целевой run API) |
 
 ## Чего нет в v1
 

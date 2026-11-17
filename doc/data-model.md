@@ -100,7 +100,7 @@ Session (runtime, не в vault):
 | name | string | Уникально в пределах `host_id` (шаблоны: `host_id=null`) |
 | description | string? | |
 | tags | string[] | |
-| body | string | Shell-текст для вставки в PTY |
+| body | string | Shell-текст; целевой MCP run использует отдельный exec-channel, не общий PTY |
 | parameters | Parameter[] | Описание подстановок |
 | group_id | UUID? | Папка (тот же scope `host_id`, что у Script) |
 | host_id | UUID? | `null` = шаблон; иначе скрипт хоста |
@@ -167,6 +167,48 @@ MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-
 - API: `hostskeeper.session.SessionManager` + `SessionInfo` (без address/username/secrets в `repr`).
 - Транспорт вкладки: **Paramiko** interactive shell; вывод в `OutputBuffer` с cursor.
 - Alias auto: `{host.name}-{username}-{n}`.
+
+### ScriptRun (runtime; не сохраняется в vault)
+
+Целевая runtime-запись состояния MCP-запуска в памяти процесса (lifecycle ещё
+не подключён к текущему MCP `scripts_run`; текущее поведение описано в
+`doc/mcp-api.md`). Запись привязана к исходной
+сессии и скрипту; origin фиксирует только тип MCP-доступа, не token или app key.
+Доступ к записи проверяется повторным разрешением `session_id` в текущем
+клиентском scope.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| run_id | UUID | Идентификатор запуска |
+| request_id | UUID | Идемпотентный ключ от MCP-клиента, уникальный для намерения в пределах сессии |
+| session_id / script_id | UUID | Исходные объекты |
+| origin | enum | `stdio` \| `http_gateway` \| `http_legacy`; не является credential |
+| state | enum | `accepted` \| `starting` \| `running` \| `cancel_requested` \| `succeeded` \| `failed` \| `cancelled` \| `session_lost` \| `execution_timed_out` \| `unknown` \| `not_supported` |
+| accepted_at / started_at / updated_at | datetime | UTC-время принятия, начала и последнего изменения |
+| completed_at | datetime? | Только если завершение процесса подтверждено |
+| exit_code | int? | Только для `succeeded` (0) и `failed` (ненулевой) |
+| error_code | enum? | Стабильный безопасный код; без сырых SSH/OS сообщений |
+| stdout / stderr metadata | object | Число удержанных символов и `truncated`; содержимое читается раздельно по cursors |
+
+`session_lost` и `execution_timed_out` не подтверждают остановку процесса; status
+ответ содержит `process_may_continue=true`. Если executor подтвердил остановку
+из-за execution timeout, state становится `cancelled` с `error_code`=`execution_timeout`
+и без exit code. Утрата связи, timeout или неизвестный результат никогда не
+получают выдуманный exit code. Status/wait/cancel повторно проверяют, что
+исходная сессия доступна в scope запроса; знание `run_id` само по себе не даёт
+доступа.
+
+Повтор с тем же `request_id` и `session_id` возвращает исходную запись, не
+запуская скрипт повторно; новый запуск требует нового request id. Идемпотентность
+действует, пока запись сохранена (до 24 часов). Run records и output существуют
+только в памяти текущего процесса. Записи удерживаются до 24 часов, максимум
+100; активные не вытесняются. При заполнении лимита новые запуски отклоняются до
+освобождения места. На каждый
+stdout/stderr stream удерживается до 131072 символов с начала вывода; последующий
+текст отбрасывается и отмечается `truncated=true`. Перезапуск HostsKeeper удаляет
+run records. `error_code` может содержать только стабильные коды (`start_failed`,
+`session_lost`, `execution_timeout`, `cancel_unconfirmed`, `not_supported`,
+`unknown`), но не raw exception text.
 
 ## Что отдаётся наружу через MCP
 

@@ -30,7 +30,8 @@
 - Approve — на уровне сессии (default выкл = MCP read-only; вкл = write/run без модалки); CRUD скриптов без Approve.
 - UI — класс connection manager (дерево + тулбар + вкладки), не чат-layout.
 - Платформа v1 — Windows; ядро — Python.
-- **Не делать:** облако, Multiplayer, агент на целевых хостах, non-interactive SSH как продукт, backup vault, импорт Termius.
+- **Не делать:** облако, Multiplayer, агент на целевых хостах, общий произвольный non-interactive SSH exec, backup vault, импорт Termius.
+- Узкое исполнение сохранённых MCP-скриптов через отдельный exec-channel поверх transport уже открытой человеком MCP-вкладки разрешено; см. `doc/requirements.md`.
 
 ## Правила работы исполнителя
 
