@@ -120,7 +120,11 @@ _INSTRUCTIONS = (
     "guarantee the remote process stopped. Use session_read or session_subscribe "
     "only for the shared PTY. submit=true sends Enter; submit=false types without Enter. "
     "Use scripts_list and select a script by id before scripts_get or scripts_run. "
-    "Use scripts_validate to check a draft before saving it. "
+    "Use scripts_validate before saving or running a draft to check placeholder "
+    "and parameter structure. This is static validation only; it does not execute "
+    "the script, assess shell security, or guarantee compatibility with the target "
+    "shell or host. If needed, explicitly ask the MCP client to call "
+    "scripts_validate; tool discovery and selection are client behavior. "
     "Host-bound scripts require an MCP-enabled open tab for that host. "
     "Tool failures are returned with isError=true; use "
     "the error code and message to correct the request."
@@ -376,21 +380,44 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
 
     @mcp.tool(annotations=_READ_ONLY)
     def scripts_validate(
-        body: Annotated[str, Field(description="Draft shell text; it is analyzed but never saved or run.")],
+        body: Annotated[
+            str,
+            Field(
+                description=(
+                    "Draft shell text for static placeholder analysis only; never "
+                    "saved or executed. This does not assess shell security or "
+                    "guarantee target-shell/host compatibility."
+                )
+            ),
+        ],
         parameters: Annotated[
             list[ScriptParameterInput] | None,
-            Field(description="Placeholder declarations to check against the draft body."),
+            Field(
+                description=(
+                    "Placeholder declarations to check against the draft body; "
+                    "this is not runtime validation."
+                )
+            ),
         ] = None,
         params: Annotated[
             dict[str, str] | None,
-            Field(description="Optional values used only to report whether the draft can be rendered; values are never returned."),
+            Field(
+                description=(
+                    "Optional values used only to report whether placeholders are "
+                    "satisfied; values are never returned. They do not prove the "
+                    "script will execute successfully."
+                )
+            ),
         ] = None,
     ) -> dict[str, object]:
-        """Check placeholder syntax and parameters without saving or writing to a PTY.
+        """Statically check placeholder syntax and parameter readiness.
 
         The result includes placeholder names and character positions, structural
         errors, unused-parameter warnings, and missing value names. It never
-        includes the body, defaults, or supplied values.
+        includes the body, defaults, or supplied values. It does not parse or run
+        shell commands, audit their safety, or guarantee host/shell compatibility.
+        Use it before saving or running a draft; explicitly request this tool if
+        the MCP client does not select it automatically.
         """
         try:
             return service.scripts_validate(

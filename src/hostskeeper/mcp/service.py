@@ -471,7 +471,7 @@ class McpToolService:
         parameters: list[dict[str, Any]] | None = None,
         params: dict[str, str] | None = None,
     ) -> dict[str, object]:
-        """Validate a script draft without saving, rendering, or writing to a PTY."""
+        """Statically check draft placeholders without execution or safety analysis."""
         self._assert_access(access)
         try:
             parsed_parameters = [

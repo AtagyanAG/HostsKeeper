@@ -57,6 +57,8 @@ def test_streamable_http_metadata_errors_and_structured_results(
         session_id = initialized.headers["mcp-session-id"]
         init_result = _event_payload(initialized)["result"]
         assert init_result["instructions"]
+        assert "static validation only" in init_result["instructions"]
+        assert "tool discovery and selection are client behavior" in init_result["instructions"]
         assert init_result["serverInfo"]["version"] == __version__
 
         request_headers = {**HEADERS, "Mcp-Session-Id": session_id}
@@ -91,6 +93,10 @@ def test_streamable_http_metadata_errors_and_structured_results(
         assert by_name["session_list"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_compare"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_validate"]["annotations"]["readOnlyHint"] is True
+        validate_description = by_name["scripts_validate"]["description"].lower()
+        assert "statically check" in validate_description
+        assert "does not parse or run" in validate_description
+        assert "explicitly request" in validate_description
         assert by_name["groups_delete"]["annotations"]["destructiveHint"] is True
         run_tool = by_name["scripts_run"]
         assert "request_id" in run_tool["inputSchema"]["required"]
