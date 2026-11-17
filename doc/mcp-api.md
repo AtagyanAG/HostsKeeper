@@ -371,18 +371,27 @@ Host-bound скрипт запускается только во вкладке 
 
 `request_id` — UUID от клиента для одного намерения запуска. Повтор с тем же
 `request_id` в той же сессии возвращает исходный run без повторного запуска;
-для нового запуска нужен новый ID. Ответ:
+для нового запуска нужен новый ID. `state="accepted"` подтверждает первоначальное
+принятие намерения, а `current_state` сообщает последнее состояние записи на
+момент ответа. `replayed=true` означает, что запрос уже принимался ранее.
+Ответ:
 
 ```json
 {
   "run_id": "uuid",
   "state": "accepted",
-  "accepted_at": "2026-11-17T10:00:00Z"
+  "accepted_at": "2026-11-17T10:00:00Z",
+  "replayed": false,
+  "current_state": "running"
 }
 ```
 
-`accepted` подтверждает только принятие запроса HostsKeeper, а не запуск либо
-успешное выполнение на target host. Ошибки включают `missing_param`,
+При повторе ответ сохраняет `state="accepted"` как семантику первоначального
+подтверждения, возвращает прежние `run_id` и `accepted_at`, устанавливает
+`replayed=true`, а `current_state` показывает существующее состояние, например
+`succeeded`. Клиент может вызвать `scripts_run_status` / `scripts_run_wait` для
+более свежего снимка. `accepted` подтверждает только принятие запроса
+HostsKeeper, а не запуск либо успешное выполнение на target host. Ошибки включают `missing_param`,
 `unknown_placeholder`, `disconnected`, `approve_required`, `client_scope`,
 `run_capacity` и общий `not_found` для недоступного скрипта.
 `run_capacity` сохраняет стабильный код, а сообщение указывает применимый

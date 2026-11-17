@@ -116,6 +116,8 @@ _INSTRUCTIONS = (
     "runs only a saved, visible script on an isolated SSH exec channel and returns "
     "a run_id, not a completion result. Label it Run script: <name>; "
     "use scripts_run_wait/status for its separate bounded stdout/stderr and state. "
+    "scripts_run returns replayed and current_state; reusing a request_id returns "
+    "the same run and never executes it again. "
     "Do not infer script output from the shared PTY. scripts_run_cancel cannot "
     "guarantee the remote process stopped; an unconfirmed cancel remains unknown "
     "and is not reconciled later. Such runs reserve capacity until their records "
@@ -539,6 +541,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         restricted to a tab for the same host. `request_id` must be a UUID and
         makes retries idempotent. The accepted response is not an execution result;
         use scripts_run_wait/status to inspect completion and bounded output.
+        The response includes `replayed` and `current_state`; a retry returns the
+        same run without executing it again.
         `run_capacity` means a per-session limit of 1, a process limit of 8, or
         a retained-record limit of 100; no queue is configured. Unconfirmed runs
         reserve capacity until their records expire.

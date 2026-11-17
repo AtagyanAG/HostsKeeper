@@ -212,6 +212,12 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     assert accepted["state"] == "accepted"
     assert accepted["run_id"]
     assert accepted["accepted_at"]
+    assert accepted["replayed"] is False
+    assert accepted["current_state"] in {
+        "starting",
+        "running",
+        "succeeded",
+    }
 
     retried = service.scripts_run(
         access,
@@ -220,6 +226,13 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
         alias=info.alias,
     )
     assert retried["run_id"] == accepted["run_id"]
+    assert retried["state"] == "accepted"
+    assert retried["replayed"] is True
+    assert retried["current_state"] in {
+        "starting",
+        "running",
+        "succeeded",
+    }
     assert len(shell.commands) == 1
 
     result = service.scripts_run_wait(
@@ -239,6 +252,17 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     assert result["stdout"]["data"].count("output line") == 1
     assert result["stderr"]["data"] == ""
     assert result["wait_timed_out"] is False
+    completed_retry = service.scripts_run(
+        access,
+        request_id=request_id,
+        script_id=str(uuid4()),
+        alias=info.alias,
+    )
+    assert completed_retry["run_id"] == accepted["run_id"]
+    assert completed_retry["state"] == "accepted"
+    assert completed_retry["replayed"] is True
+    assert completed_retry["current_state"] == "succeeded"
+    assert len(shell.commands) == 1
     status = service.scripts_run_status(
         access,
         run_id=accepted["run_id"],

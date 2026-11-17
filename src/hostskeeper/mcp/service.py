@@ -746,7 +746,7 @@ class McpToolService:
         session_id: str | None = None,
         alias: str | None = None,
     ) -> dict[str, Any]:
-        run = self._start_script_run(
+        run, replayed = self._start_script_run_with_replay(
             access,
             request_id=request_id,
             script_id=script_id,
@@ -760,6 +760,8 @@ class McpToolService:
             "run_id": str(run.run_id),
             "state": "accepted",
             "accepted_at": run.accepted_at.isoformat(),
+            "replayed": replayed,
+            "current_state": run.state.value,
         }
 
     def _start_script_run(
@@ -774,6 +776,30 @@ class McpToolService:
         session_id: str | None = None,
         alias: str | None = None,
     ) -> ScriptRunInfo:
+        run, _ = self._start_script_run_with_replay(
+            access,
+            request_id=request_id,
+            script_id=script_id,
+            name=name,
+            host_id=host_id,
+            params=params,
+            session_id=session_id,
+            alias=alias,
+        )
+        return run
+
+    def _start_script_run_with_replay(
+        self,
+        access: McpAccess,
+        *,
+        request_id: str,
+        script_id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+        params: dict[str, str] | None = None,
+        session_id: str | None = None,
+        alias: str | None = None,
+    ) -> tuple[ScriptRunInfo, bool]:
         """Start a visible saved script on an isolated SSH exec channel."""
         try:
             request_uuid = UUID(request_id)
@@ -790,7 +816,7 @@ class McpToolService:
         except ScriptRunStartError as exc:
             raise McpToolError(exc.code) from exc
         if existing is not None:
-            return existing
+            return existing, True
 
         script = self._find_script(
             access, id=script_id, name=name, host_id=host_id
@@ -808,13 +834,10 @@ class McpToolService:
             else ScriptRunOrigin.HTTP_LEGACY
         )
         try:
-            return self._sessions.start_script_run(
-                info.id,
-                script.id,
-                request_uuid,
-                params=params,
-                origin=origin,
+            run = self._sessions.start_script_run(
+                info.id, script.id, request_uuid, params=params, origin=origin
             )
+            return run, False
         except ScriptRenderError as exc:
             raise McpToolError(exc.code, str(exc)) from exc
         except ScriptRunStartError as exc:
