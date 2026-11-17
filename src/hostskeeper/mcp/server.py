@@ -537,6 +537,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         restricted to a tab for the same host. `request_id` must be a UUID and
         makes retries idempotent. The accepted response is not an execution result;
         use scripts_run_wait/status to inspect completion and bounded output.
+        `run_capacity` means a per-session limit of 1, a process limit of 8, or
+        a retained-record limit of 100; no queue is configured. Unconfirmed runs
+        reserve capacity until their records expire.
         """
         try:
             return service.scripts_run(

@@ -10,8 +10,11 @@ import pytest
 
 from hostskeeper.session.buffer import OutputBuffer
 from hostskeeper.session.script_run_manager import (
+    SCRIPT_RUN_MAX_ACTIVE_PROCESS,
+    SCRIPT_RUN_MAX_RECORDS,
     SCRIPT_RUN_OUTPUT_RESPONSE_MAX_CHARS,
     ScriptRunCapacityError,
+    ScriptRunCapacityReason,
     ScriptRunManager,
     ScriptRunNotFoundError,
 )
@@ -442,7 +445,7 @@ def test_active_run_limits_reject_a_second_session_run() -> None:
     manager = ScriptRunManager()
     session_id, _, first = _start(manager, FakeChannel(exit_code=None))
 
-    with pytest.raises(ScriptRunCapacityError):
+    with pytest.raises(ScriptRunCapacityError) as capacity:
         manager.start(
             session_id=session_id,
             script_id=uuid4(),
@@ -454,8 +457,9 @@ def test_active_run_limits_reject_a_second_session_run() -> None:
             ),
             session_alive=lambda: True,
         )
+    assert capacity.value.reason == ScriptRunCapacityReason.SESSION_LIMIT
     manager.cancel(session_id, first.run_id)
-    with pytest.raises(ScriptRunCapacityError):
+    with pytest.raises(ScriptRunCapacityError) as uncertain_capacity:
         manager.start(
             session_id=session_id,
             script_id=uuid4(),
@@ -465,6 +469,36 @@ def test_active_run_limits_reject_a_second_session_run() -> None:
             open_channel=lambda command: _return_channel(command, FakeChannel()),
             session_alive=lambda: True,
         )
+    assert uncertain_capacity.value.reason == ScriptRunCapacityReason.SESSION_LIMIT
+
+
+def test_process_run_limit_reports_its_scope() -> None:
+    manager = ScriptRunManager()
+    runs = [
+        _start(manager, FakeChannel(exit_code=None))
+        for _ in range(SCRIPT_RUN_MAX_ACTIVE_PROCESS)
+    ]
+
+    with pytest.raises(ScriptRunCapacityError) as capacity:
+        _start(manager, FakeChannel(exit_code=None))
+
+    assert capacity.value.reason == ScriptRunCapacityReason.PROCESS_LIMIT
+    for session_id, _, run in runs:
+        manager.cancel(session_id, run.run_id)
+
+
+def test_retained_record_limit_is_distinct_from_concurrency_limit() -> None:
+    manager = ScriptRunManager()
+    for _ in range(SCRIPT_RUN_MAX_RECORDS):
+        session_id, _, started = _start(manager, FakeChannel(exit_code=0))
+        _wait_for_state(
+            manager, session_id, started.run_id, ScriptRunState.SUCCEEDED
+        )
+
+    with pytest.raises(ScriptRunCapacityError) as capacity:
+        _start(manager, FakeChannel(exit_code=0))
+
+    assert capacity.value.reason == ScriptRunCapacityReason.RECORD_LIMIT
 
 
 def test_start_failure_is_reported_without_raw_exception() -> None:

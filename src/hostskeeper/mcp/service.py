@@ -818,7 +818,7 @@ class McpToolService:
         except ScriptRenderError as exc:
             raise McpToolError(exc.code, str(exc)) from exc
         except ScriptRunStartError as exc:
-            raise McpToolError(exc.code) from exc
+            raise McpToolError(exc.code, str(exc)) from exc
         except SessionNotFoundError as exc:
             raise McpToolError("not_found", "session not found in MCP scope") from exc
 

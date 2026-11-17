@@ -55,9 +55,9 @@ class SessionStateError(SessionError):
 class ScriptRunStartError(SessionError):
     """Safe, stable reason a saved MCP script run could not be started."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, message: str | None = None) -> None:
         self.code = code
-        super().__init__(code)
+        super().__init__(message or code)
 
 
 class McpClientBusyError(SessionError):
@@ -261,7 +261,7 @@ class SessionManager:
                     display_buffer=state.buffer,
                 )
             except ScriptRunCapacityError as exc:
-                raise ScriptRunStartError("run_capacity") from exc
+                raise ScriptRunStartError("run_capacity", str(exc)) from exc
 
     def start_user_script_run(
         self, session_id: UUID, script_id: UUID
@@ -295,7 +295,7 @@ class SessionManager:
                     display_buffer=state.buffer,
                 )
             except ScriptRunCapacityError as exc:
-                raise SessionStateError("script run capacity reached") from exc
+                raise SessionStateError(str(exc)) from exc
 
     def get_script_run(self, session_id: UUID, run_id: UUID) -> ScriptRunInfo:
         with self._lock:

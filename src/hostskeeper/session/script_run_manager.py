@@ -8,6 +8,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from math import isfinite
 from typing import Callable
 from uuid import UUID, uuid4
@@ -59,8 +60,37 @@ class ScriptRunNotFoundError(Exception):
     """Run does not belong to the requested session or is no longer retained."""
 
 
+class ScriptRunCapacityReason(str, Enum):
+    SESSION_LIMIT = "session_limit"
+    PROCESS_LIMIT = "process_limit"
+    RECORD_LIMIT = "record_limit"
+
+    @property
+    def message(self) -> str:
+        return {
+            ScriptRunCapacityReason.SESSION_LIMIT: (
+                "This session already has an active or unconfirmed run; "
+                "the limit is 1 per session. No queue is configured. "
+                "An unconfirmed run may reserve the slot until its record "
+                "expires (up to 24 hours)."
+            ),
+            ScriptRunCapacityReason.PROCESS_LIMIT: (
+                "The process limit of 8 active or unconfirmed runs is reached. "
+                "No queue is configured."
+            ),
+            ScriptRunCapacityReason.RECORD_LIMIT: (
+                "The limit of 100 retained run records is reached. Records "
+                "expire after up to 24 hours. No queue is configured."
+            ),
+        }[self]
+
+
 class ScriptRunCapacityError(Exception):
     """A fixed v1 run or retention limit has been reached."""
+
+    def __init__(self, reason: ScriptRunCapacityReason) -> None:
+        self.reason = reason
+        super().__init__(reason.message)
 
 
 @dataclass(frozen=True)
@@ -194,11 +224,11 @@ class ScriptRunManager:
             if existing_id is not None:
                 return self._info_snapshot(self._records[existing_id])
             if len(self._records) >= SCRIPT_RUN_MAX_RECORDS:
-                raise ScriptRunCapacityError
+                raise ScriptRunCapacityError(ScriptRunCapacityReason.RECORD_LIMIT)
             if self._capacity_count(session_id=session_id) >= SCRIPT_RUN_MAX_ACTIVE_PER_SESSION:
-                raise ScriptRunCapacityError
+                raise ScriptRunCapacityError(ScriptRunCapacityReason.SESSION_LIMIT)
             if self._capacity_count() >= SCRIPT_RUN_MAX_ACTIVE_PROCESS:
-                raise ScriptRunCapacityError
+                raise ScriptRunCapacityError(ScriptRunCapacityReason.PROCESS_LIMIT)
 
             now = _utcnow()
             info = ScriptRunInfo(

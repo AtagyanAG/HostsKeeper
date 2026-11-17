@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -252,6 +252,37 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     assert "output line\r\n" in transcript
     assert f"finished: succeeded; exit_code=0" in transcript
     assert rendered not in transcript
+
+
+def test_run_capacity_error_explains_session_limit_without_sensitive_details(
+    stack,
+) -> None:
+    _, sessions, service, _, script, info, shell = stack
+    shell.channel.exit_status_ready = lambda: False
+    access = McpAccess(mode="stdio")
+    started = service.scripts_run(
+        access,
+        request_id=str(uuid4()),
+        script_id=str(script.id),
+        alias=info.alias,
+    )
+
+    with pytest.raises(McpToolError) as capacity:
+        service.scripts_run(
+            access,
+            request_id=str(uuid4()),
+            script_id=str(script.id),
+            alias=info.alias,
+        )
+
+    assert capacity.value.code == "run_capacity"
+    assert "limit is 1 per session" in str(capacity.value)
+    assert "No queue is configured" in str(capacity.value)
+    assert script.body not in str(capacity.value)
+    assert len(shell.commands) == 1
+    with pytest.raises(SessionStateError, match="limit is 1 per session"):
+        sessions.start_user_script_run(info.id, script.id)
+    sessions.cancel_script_run(info.id, UUID(started["run_id"]))
 
 
 def test_run_wait_validates_timeout_and_inspection_is_scoped(stack) -> None:
