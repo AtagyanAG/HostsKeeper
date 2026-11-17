@@ -297,22 +297,39 @@ def test_run_transcript_is_shared_and_never_echoes_script_body(
     assert "sensitive shell body" not in transcript
 
 
-def test_run_transcript_marks_output_truncation() -> None:
+@pytest.mark.parametrize(
+    ("size_delta", "truncated"),
+    [(-1, False), (0, False), (1, True)],
+)
+def test_run_transcript_marks_output_truncation_at_capture_limit(
+    size_delta: int, truncated: bool
+) -> None:
     manager = ScriptRunManager()
     display_buffer = OutputBuffer()
+    output_size = SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM + size_delta
     channel = FakeChannel(
-        stdout=b"z" * (SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM + 100),
+        stdout=b"z" * output_size,
         exit_code=0,
     )
     session_id, _, started = _start(
         manager, channel, display_buffer=display_buffer
     )
 
-    _wait_for_state(manager, session_id, started.run_id, ScriptRunState.SUCCEEDED)
+    completed = _wait_for_state(
+        manager, session_id, started.run_id, ScriptRunState.SUCCEEDED
+    )
     transcript = display_buffer.snapshot()
 
-    assert transcript.count("z") == SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM
-    assert transcript.count("Run output truncated at capture limit.") == 1
+    assert completed.output.stdout_chars_retained == min(
+        output_size, SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM
+    )
+    assert completed.output.stdout_truncated is truncated
+    assert transcript.count("z") == min(
+        output_size, SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM
+    )
+    assert transcript.count("Run output truncated at capture limit.") == int(
+        truncated
+    )
 
 
 def test_transcript_normalizes_bare_line_feeds_for_terminal_display() -> None:
