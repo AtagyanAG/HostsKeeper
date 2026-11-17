@@ -19,18 +19,24 @@ class FakeExecChannel:
         self.active = True
         self.closed = False
         self._exit_code = 0
+        self.stdout = bytearray()
+        self.stderr = bytearray()
 
     def recv_ready(self) -> bool:
-        return False
+        return bool(self.stdout)
 
-    def recv(self, _size: int) -> bytes:
-        return b""
+    def recv(self, size: int) -> bytes:
+        data = bytes(self.stdout[:size])
+        del self.stdout[:size]
+        return data
 
     def recv_stderr_ready(self) -> bool:
-        return False
+        return bool(self.stderr)
 
-    def recv_stderr(self, _size: int) -> bytes:
-        return b""
+    def recv_stderr(self, size: int) -> bytes:
+        data = bytes(self.stderr[:size])
+        del self.stderr[:size]
+        return data
 
     def exit_status_ready(self) -> bool:
         return True
@@ -131,6 +137,8 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     _, sessions, service, _, script, info, shell = stack
     access = McpAccess(mode="stdio")
     request_id = str(uuid4())
+    rendered = "printf 'ok'"
+    shell.channel.stdout.extend(rendered.encode("utf-8"))
 
     accepted = service.scripts_run(
         access,
@@ -162,17 +170,21 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     assert result["state"] == "succeeded"
     assert result["exit_code"] == 0
     assert result["stdout"] == {
-        "cursor": "0",
-        "data": "",
+        "cursor": str(len(rendered)),
+        "data": rendered,
         "truncated": False,
     }
+    assert result["stdout"]["data"].count(rendered) == 1
     assert result["stderr"]["data"] == ""
     assert result["wait_timed_out"] is False
-    assert service.scripts_run_status(
+    status = service.scripts_run_status(
         access,
         run_id=accepted["run_id"],
         alias=info.alias,
-    )["state"] == "succeeded"
+    )
+    assert status["state"] == "succeeded"
+    assert rendered not in str(status)
+    assert shell.writes == []
     assert sessions.read(info.id).data == ""
 
 
