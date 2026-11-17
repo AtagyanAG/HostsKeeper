@@ -115,14 +115,18 @@ _INSTRUCTIONS = (
     "does not report command completion. scripts_run also requires Approve, but "
     "runs only a saved, visible script on an isolated SSH exec channel and returns "
     "a run_id, not a completion result. Label it Run script: <name>; "
-    "use scripts_run_wait/status for its separate bounded stdout/stderr and state. "
+    "its stdout/stderr are also mirrored into the shared terminal buffer and may "
+    "appear in session_read/session_subscribe; this is a duplicate display, not "
+    "a second execution. For an MCP run's output and state, use "
+    "scripts_run_wait/status with its run_id as the source of truth; do not report "
+    "the mirrored text as a separate result. Use session_read/session_subscribe "
+    "for interactive PTY context. "
     "scripts_run returns replayed and current_state; reusing a request_id returns "
     "the same run and never executes it again. "
-    "Do not infer script output from the shared PTY. scripts_run_cancel cannot "
-    "guarantee the remote process stopped; an unconfirmed cancel remains unknown "
+    "scripts_run_cancel cannot guarantee the remote process stopped; "
+    "an unconfirmed cancel remains unknown "
     "and is not reconciled later. Such runs reserve capacity until their records "
-    "expire. Use session_read or session_subscribe "
-    "only for the shared PTY. submit=true sends Enter; submit=false types without Enter. "
+    "expire. submit=true sends Enter; submit=false types without Enter. "
     "Use scripts_list and select a script by id before scripts_get or scripts_run. "
     "Use scripts_validate before saving or running a draft to check placeholder "
     "and parameter structure. This is static validation only; it does not execute "
@@ -258,11 +262,14 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
             ),
         ] = 65536,
     ) -> dict[str, Any]:
-        """Read terminal output from a buffer cursor.
+        """Read the shared session buffer from a cursor.
 
         With no cursor, reading starts at the beginning of retained output. Save
         the returned cursor and pass it to the next call; truncated=true means
-        more buffered output remains.
+        more buffered output remains. The buffer includes interactive PTY output
+        and mirrored saved-script transcripts. For an MCP run, use
+        scripts_run_wait/status by run_id for its result; the mirrored text here
+        is not a separate execution.
         """
         try:
             return service.session_read(
@@ -312,10 +319,12 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
             Field(gt=0, le=300, description="Long-poll duration in seconds; default 30, maximum 300."),
         ] = 30.0,
     ) -> dict[str, Any]:
-        """Wait for output or a session status change.
+        """Wait for shared-buffer output or a session status change.
 
         Use instead of repeated rapid session_read calls. The result type is
         output (with cursor and data) or status; timeout returns empty output.
+        Saved-script output may be mirrored here; use scripts_run_wait/status by
+        run_id for an MCP run's result, not this duplicate display.
         """
         try:
             return service.session_subscribe(
@@ -541,6 +550,10 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         restricted to a tab for the same host. `request_id` must be a UUID and
         makes retries idempotent. The accepted response is not an execution result;
         use scripts_run_wait/status to inspect completion and bounded output.
+        stdout/stderr are also mirrored into the shared session buffer and may
+        appear in session_read/session_subscribe. This is a duplicate display of
+        the same run, not a second execution; use the run tools as the source of
+        truth and do not report the mirrored text separately.
         The response includes `replayed` and `current_state`; a retry returns the
         same run without executing it again.
         `run_capacity` means a per-session limit of 1, a process limit of 8, or

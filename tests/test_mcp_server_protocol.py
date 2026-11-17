@@ -59,6 +59,8 @@ def test_streamable_http_metadata_errors_and_structured_results(
         assert init_result["instructions"]
         assert "static validation only" in init_result["instructions"]
         assert "tool discovery and selection are client behavior" in init_result["instructions"]
+        assert "duplicate display, not a second execution" in init_result["instructions"]
+        assert "do not report the mirrored text as a separate result" in init_result["instructions"]
         assert init_result["serverInfo"]["version"] == __version__
 
         request_headers = {**HEADERS, "Mcp-Session-Id": session_id}
@@ -83,6 +85,11 @@ def test_streamable_http_metadata_errors_and_structured_results(
             for property_schema in tool["inputSchema"].get("properties", {}).values()
         )
         by_name = {tool["name"]: tool for tool in tools}
+        run_description = " ".join(by_name["scripts_run"]["description"].split())
+        read_description = " ".join(by_name["session_read"]["description"].split())
+        subscribe_description = " ".join(
+            by_name["session_subscribe"]["description"].split()
+        )
         assert {
             "scripts_run",
             "scripts_run_status",
@@ -99,6 +106,12 @@ def test_streamable_http_metadata_errors_and_structured_results(
         assert "explicitly request" in validate_description
         assert by_name["groups_delete"]["annotations"]["destructiveHint"] is True
         run_tool = by_name["scripts_run"]
+        assert "mirrored into the shared session buffer" in run_description
+        assert "not a second execution" in run_description
+        assert "source of truth" in run_description
+        assert "mirrored saved-script transcripts" in read_description
+        assert "not a separate execution" in read_description
+        assert "mirrored here" in subscribe_description
         assert "request_id" in run_tool["inputSchema"]["required"]
         assert "submit" not in run_tool["inputSchema"]["properties"]
         assert run_tool["annotations"]["destructiveHint"] is True
