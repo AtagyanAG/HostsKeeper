@@ -117,7 +117,9 @@ _INSTRUCTIONS = (
     "a run_id, not a completion result. Label it Run script: <name>; "
     "use scripts_run_wait/status for its separate bounded stdout/stderr and state. "
     "Do not infer script output from the shared PTY. scripts_run_cancel cannot "
-    "guarantee the remote process stopped. Use session_read or session_subscribe "
+    "guarantee the remote process stopped; an unconfirmed cancel remains unknown "
+    "and is not reconciled later. Such runs reserve capacity until their records "
+    "expire. Use session_read or session_subscribe "
     "only for the shared PTY. submit=true sends Enter; submit=false types without Enter. "
     "Use scripts_list and select a script by id before scripts_get or scripts_run. "
     "Use scripts_validate before saving or running a draft to check placeholder "
@@ -642,7 +644,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         """Request cancellation of a script run without using the shared PTY.
 
         Closing the local SSH channel does not prove that the remote process
-        stopped; the result can remain unknown with process_may_continue=true.
+        stopped; the record remains unknown with process_may_continue=true and
+        is not reconciled later. Unconfirmed runs reserve capacity until record
+        expiry.
         This request does not require Approve but remains scoped to the original
         MCP-enabled session.
         """

@@ -362,6 +362,14 @@ def test_cancel_and_approve_revoke_never_claim_confirmed_cancellation() -> None:
     assert info.process_may_continue is True
     assert channel.closed is True
 
+    channel._exit_code = 0
+    time.sleep(0.05)
+    unchanged = manager.get(session_id, started.run_id)
+    assert unchanged.state == ScriptRunState.UNKNOWN
+    assert unchanged.error_code == ScriptRunErrorCode.CANCEL_UNCONFIRMED
+    assert unchanged.completed_at is None
+    assert unchanged.exit_code is None
+
     next_channel = FakeChannel(exit_code=None)
     next_session, _, next_run = _start(manager, next_channel)
     manager.on_execution_access_revoked(next_session)
