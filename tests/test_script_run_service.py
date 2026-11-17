@@ -157,7 +157,7 @@ def test_user_start_is_explicit_and_uses_same_transcript_without_mcp_gates(
     assert shell.commands == ["printf 'default'"]
     assert shell.writes == []
     assert f"Run script: {script.name} [{started.run_id}]" in transcript
-    assert "initiator: human" in transcript
+    assert "initiator: user" in transcript
     assert f"finished: succeeded; exit_code=0" in transcript
     assert shell.commands[0] not in transcript
 

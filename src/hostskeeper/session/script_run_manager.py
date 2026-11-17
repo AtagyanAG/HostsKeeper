@@ -135,6 +135,7 @@ class _ScriptRunRecord:
     stdout: _BoundedOutputBuffer = field(default_factory=_BoundedOutputBuffer)
     stderr: _BoundedOutputBuffer = field(default_factory=_BoundedOutputBuffer)
     display_output_truncation_notified: bool = False
+    display_last_char_was_cr: bool = False
     channel: paramiko.Channel | None = None
     session_alive: Callable[[], bool] = lambda: False
     deadline: float | None = None
@@ -222,14 +223,15 @@ class ScriptRunManager:
 
         if record.display_buffer is not None:
             initiator = (
-                "human"
+                "user"
                 if record.info.origin == ScriptRunOrigin.USER_INTERFACE
                 else "MCP client"
             )
-            record.display_buffer.append(
+            _append_display_text(
+                record,
                 "\r\n"
                 f"[HostsKeeper] Run script: {record.display_name} "
-                f"[{record.info.run_id}] - starting (initiator: {initiator})\r\n"
+                f"[{record.info.run_id}] - starting (initiator: {initiator})\r\n",
             )
 
         try:
@@ -514,14 +516,15 @@ class ScriptRunManager:
             was_truncated = output.truncated
             retained = output.append(safe_text)
             if record.display_buffer is not None and retained:
-                record.display_buffer.append(retained)
+                _append_display_text(record, retained)
             if (
                 record.display_buffer is not None
                 and output.truncated
                 and not was_truncated
                 and not record.display_output_truncation_notified
             ):
-                record.display_buffer.append(
+                _append_display_text(
+                    record,
                     "\r\n[HostsKeeper] Run output truncated at capture limit.\r\n"
                 )
                 record.display_output_truncation_notified = True
@@ -596,9 +599,10 @@ class ScriptRunManager:
             detail = "exit_code=unknown; process_may_continue=true"
         else:
             detail = "exit_code=unknown"
-        record.display_buffer.append(
+        _append_display_text(
+            record,
             f"\r\n[HostsKeeper] Run [{record.info.run_id}] finished: "
-            f"{state}; {detail}\r\n"
+            f"{state}; {detail}\r\n",
         )
 
     def _update_output(self, record: _ScriptRunRecord) -> None:
@@ -729,6 +733,29 @@ def _safe_display_name(name: str) -> str:
         for char in name
     )
     return safe[:120] or "script"
+
+
+def _normalize_terminal_line_endings(
+    text: str, previous_char_was_cr: bool
+) -> tuple[str, bool]:
+    normalized: list[str] = []
+    for char in text:
+        if char == "\n":
+            normalized.append("\n" if previous_char_was_cr else "\r\n")
+            previous_char_was_cr = False
+        else:
+            normalized.append(char)
+            previous_char_was_cr = char == "\r"
+    return "".join(normalized), previous_char_was_cr
+
+
+def _append_display_text(record: _ScriptRunRecord, text: str) -> None:
+    if record.display_buffer is None:
+        return
+    normalized, record.display_last_char_was_cr = _normalize_terminal_line_endings(
+        text, record.display_last_char_was_cr
+    )
+    record.display_buffer.append(normalized)
 
 
 def _utcnow() -> datetime:

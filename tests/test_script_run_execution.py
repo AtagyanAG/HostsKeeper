@@ -260,7 +260,7 @@ def test_run_output_is_bounded_sanitized_and_cursor_readable() -> None:
     ("origin", "initiator"),
     [
         (ScriptRunOrigin.STDIO, "MCP client"),
-        (ScriptRunOrigin.USER_INTERFACE, "human"),
+        (ScriptRunOrigin.USER_INTERFACE, "user"),
     ],
 )
 def test_run_transcript_is_shared_and_never_echoes_script_body(
@@ -310,6 +310,25 @@ def test_run_transcript_marks_output_truncation() -> None:
 
     assert transcript.count("z") == SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM
     assert transcript.count("Run output truncated at capture limit.") == 1
+
+
+def test_transcript_normalizes_bare_line_feeds_for_terminal_display() -> None:
+    manager = ScriptRunManager()
+    display_buffer = OutputBuffer()
+    channel = FakeChannel(
+        stdout=b"first\r\nsecond\nthird\r",
+        exit_code=0,
+        recv_chunk_size=1,
+    )
+    session_id, _, started = _start(
+        manager, channel, display_buffer=display_buffer
+    )
+
+    _wait_for_state(manager, session_id, started.run_id, ScriptRunState.SUCCEEDED)
+    result = manager.read_output(session_id, started.run_id)
+
+    assert result.stdout.data == "first\r\nsecond\nthird\r"
+    assert "first\r\nsecond\r\nthird\r" in display_buffer.snapshot()
 
 
 def test_wait_timeout_does_not_change_run_state() -> None:
