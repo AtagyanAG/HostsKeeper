@@ -98,8 +98,15 @@ class SshShell:
                     f"Tab connect timed out after {int(timeout)}s"
                 ) from exc
             raise
-        with measure_stage(self._on_stage, "open_pty_shell"):
-            channel = client.invoke_shell(term="xterm", width=120, height=40)
+        with measure_stage(self._on_stage, "open_ssh_channel"):
+            transport = client.get_transport()
+            if transport is None:
+                raise paramiko.SSHException("SSH transport is not available")
+            channel = transport.open_session()
+        with measure_stage(self._on_stage, "request_pty"):
+            channel.get_pty(term="xterm", width=120, height=40)
+        with measure_stage(self._on_stage, "request_shell"):
+            channel.invoke_shell()
         channel.settimeout(0.0)
         with self._lock:
             self._client = client

@@ -54,6 +54,7 @@ from hostskeeper.runtime.connection_debug import ConnectionTrace
 from hostskeeper.runtime.mcp_http import ensure_mcp_http, stop_mcp_http
 from hostskeeper.runtime.settings import AppSettings, default_vault_path
 from hostskeeper.runtime.state import AppState
+from hostskeeper.runtime.tree_debug_log import keep_log_on_exit
 from hostskeeper.vault import Group
 from hostskeeper.vault.errors import NotFoundError
 
@@ -172,6 +173,8 @@ class MainWindow(QMainWindow):
         if dlg.exec() != OptionsDialog.DialogCode.Accepted:
             return
         self._connection_debug_enabled = dlg.debug_log_enabled
+        if self._connection_debug_enabled:
+            keep_log_on_exit()
         from hostskeeper.desktop.theme import apply_app_theme
 
         apply_app_theme(self._settings.ui_theme)

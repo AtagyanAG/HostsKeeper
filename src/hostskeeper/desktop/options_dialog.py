@@ -71,7 +71,8 @@ class OptionsDialog(QDialog):
         self._debug_log.setToolTip(
             "Log timing for opening/reconnecting embedded SSH tabs, including "
             "the first PTY output (which may not be the shell prompt), to "
-            f"{log_path()}. This option is not saved and resets when the app closes."
+            f"{log_path()}. The setting is not saved; when enabled, the log is "
+            "kept after the app closes."
         )
 
         settings_row = QHBoxLayout()

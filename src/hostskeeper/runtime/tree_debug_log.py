@@ -2,9 +2,10 @@
 
 Log file: ``hostskeeper-tree-<pid>.log`` in the application launch directory
 (frozen: next to the exe; otherwise process cwd). Each process starts a fresh
-file. On clean shutdown the file is closed and deleted (crash leaves it for
-inspection). ``faulthandler`` is enabled on the same file for native crashes.
-Connection timing records are added only when enabled in Options.
+file. On clean shutdown the file is closed and deleted unless ``keep_log_on_exit``
+was called (crash leaves it for inspection). ``faulthandler`` is enabled on the
+same file for native crashes. Connection timing records are added only when
+enabled in Options.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ _lock = threading.Lock()
 _faulthandler_on = False
 _session_logged = False
 _removed = False
+_keep_on_exit = False
 
 
 def launch_dir() -> Path:
@@ -32,6 +34,13 @@ def launch_dir() -> Path:
 
 def log_path() -> Path:
     return launch_dir() / f"hostskeeper-tree-{os.getpid()}.log"
+
+
+def keep_log_on_exit() -> None:
+    """Keep this process log after a clean shutdown."""
+    global _keep_on_exit
+    with _lock:
+        _keep_on_exit = True
 
 
 def _write_line_unlocked(line: str) -> None:
@@ -101,7 +110,7 @@ def log_exception(event: str, exc: BaseException, **fields: object) -> None:
 
 
 def close_and_remove() -> None:
-    """Clean shutdown: disable faulthandler, close and delete this process log."""
+    """Close the process log, deleting it unless it was marked for retention."""
     global _fp, _faulthandler_on, _removed
     try:
         with _lock:
@@ -120,10 +129,11 @@ def close_and_remove() -> None:
                     pass
             _fp = None
             _removed = True
-            try:
-                if path.is_file():
-                    path.unlink()
-            except OSError:
-                pass
+            if not _keep_on_exit:
+                try:
+                    if path.is_file():
+                        path.unlink()
+                except OSError:
+                    pass
     except Exception:  # noqa: BLE001
         return
