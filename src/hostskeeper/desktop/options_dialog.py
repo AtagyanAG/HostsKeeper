@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from hostskeeper.desktop.theme import THEME_CHOICES, normalize_theme
 from hostskeeper.runtime.settings import AppSettings, settings_path
+from hostskeeper.runtime.tree_debug_log import log_path
 
 
 class OptionsDialog(QDialog):
@@ -33,6 +35,7 @@ class OptionsDialog(QDialog):
         *,
         on_copy_mcp_config: Callable[[], None] | None = None,
         on_change_mcp_key: Callable[[], None] | None = None,
+        debug_log_enabled: bool = False,
     ) -> None:
         super().__init__(parent)
         self._settings = settings
@@ -62,6 +65,14 @@ class OptionsDialog(QDialog):
         idx = self._theme.findData(normalize_theme(settings.ui_theme))
         self._theme.setCurrentIndex(idx if idx >= 0 else 0)
         self._theme.setToolTip("Application color theme (applied immediately on OK).")
+        self._debug_log = QCheckBox("Debug log")
+        self._debug_log.setObjectName("debugLogCheckbox")
+        self._debug_log.setChecked(debug_log_enabled)
+        self._debug_log.setToolTip(
+            "Log timing for opening/reconnecting embedded SSH tabs, including "
+            "the first PTY output (which may not be the shell prompt), to "
+            f"{log_path()}. This option is not saved and resets when the app closes."
+        )
 
         settings_row = QHBoxLayout()
         settings_row.addWidget(self._settings_file, stretch=1)
@@ -98,6 +109,7 @@ class OptionsDialog(QDialog):
         form.addRow("PuTTY", putty_row)
         form.addRow("WinSCP", winscp_row)
         form.addRow("Tab connect timeout", self._tab_timeout)
+        form.addRow("Diagnostics", self._debug_log)
 
         mcp_row = QHBoxLayout()
         btn_mcp = QPushButton("Copy MCP config")
@@ -130,6 +142,10 @@ class OptionsDialog(QDialog):
         layout.addLayout(mcp_row)
         layout.addWidget(buttons)
         self.setMinimumWidth(520)
+
+    @property
+    def debug_log_enabled(self) -> bool:
+        return self._debug_log.isChecked()
 
     def _copy_mcp(self) -> None:
         if self._on_copy_mcp_config is not None:

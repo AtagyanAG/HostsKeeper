@@ -50,6 +50,7 @@ from hostskeeper.desktop.session_tab import SessionTab, _OpenTabWorker, _public_
 from hostskeeper.desktop.unlock_dialog import UnlockDialog
 from hostskeeper.launchers import discover_launchers, launch_putty, launch_winscp
 from hostskeeper.mcp.app_key import vscode_mcp_config
+from hostskeeper.runtime.connection_debug import ConnectionTrace
 from hostskeeper.runtime.mcp_http import ensure_mcp_http, stop_mcp_http
 from hostskeeper.runtime.settings import AppSettings, default_vault_path
 from hostskeeper.runtime.state import AppState
@@ -96,6 +97,8 @@ class MainWindow(QMainWindow):
         self._open_thread: QThread | None = None
         self._pending_script_run: UUID | None = None
         self._open_worker: object | None = None
+        self._connection_debug_enabled = False
+        self._pending_connection_trace: ConnectionTrace | None = None
         self._shutting_down = False
         self._connect_busy = False
         # Skip persist while rebuilding trees / programmatic expand.
@@ -164,9 +167,11 @@ class MainWindow(QMainWindow):
             parent=self,
             on_copy_mcp_config=self._copy_mcp_config,
             on_change_mcp_key=self._change_mcp_key,
+            debug_log_enabled=self._connection_debug_enabled,
         )
         if dlg.exec() != OptionsDialog.DialogCode.Accepted:
             return
+        self._connection_debug_enabled = dlg.debug_log_enabled
         from hostskeeper.desktop.theme import apply_app_theme
 
         apply_app_theme(self._settings.ui_theme)
@@ -1727,11 +1732,22 @@ class MainWindow(QMainWindow):
         self._selected_host_id = host_id
         self._selected_address_id = address_id
         self._selected_credential_id = credential_id
+        trace = (
+            ConnectionTrace("tab_open")
+            if self._connection_debug_enabled
+            else None
+        )
+        self._pending_connection_trace = trace
         self._status.showMessage("Connecting…")
         thread = QThread()
         thread.setObjectName("hostskeeper-open-tab")
         worker = _OpenTabWorker(
-            self._state.sessions, host_id, address_id, credential_id, None
+            self._state.sessions,
+            host_id,
+            address_id,
+            credential_id,
+            None,
+            trace=trace,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1757,7 +1773,11 @@ class MainWindow(QMainWindow):
     def _on_open_tab_ok(self, info) -> None:
         if self._shutting_down:
             return
-        self._attach_session_tab(info.id, info.alias)
+        trace = self._pending_connection_trace
+        self._pending_connection_trace = None
+        self._attach_session_tab(info.id, info.alias, trace=trace)
+        if trace is not None:
+            trace.milestone("tab_attached")
         pending = self._pending_script_run
         self._pending_script_run = None
         if pending and self._state.sessions is not None:
@@ -1771,11 +1791,21 @@ class MainWindow(QMainWindow):
     def _on_open_tab_fail(self, message: str) -> None:
         if self._shutting_down:
             return
+        trace = self._pending_connection_trace
+        self._pending_connection_trace = None
+        if trace is not None:
+            trace.milestone("connect_failed", "failed")
         self._pending_script_run = None
         QMessageBox.critical(self, "Open Tab failed", message)
         self._status.showMessage("Connect failed")
 
-    def _attach_session_tab(self, session_id: UUID, alias: str) -> None:
+    def _attach_session_tab(
+        self,
+        session_id: UUID,
+        alias: str,
+        *,
+        trace: ConnectionTrace | None = None,
+    ) -> None:
         assert self._state.sessions is not None
         if self._welcome_index is not None:
             self._tabs.removeTab(self._welcome_index)
@@ -1785,6 +1815,8 @@ class MainWindow(QMainWindow):
             session_id,
             mcp_host=self._state.mcp_host,
             mcp_port=self._state.mcp_port,
+            connection_trace=trace,
+            connection_debug_enabled=lambda: self._connection_debug_enabled,
             parent=self._tabs,
         )
         tab.closed.connect(self._on_session_tab_closed)

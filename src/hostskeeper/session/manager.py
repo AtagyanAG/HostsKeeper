@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from hostskeeper.session.buffer import BufferRead, OutputBuffer
+from hostskeeper.session.diagnostics import (
+    ConnectionStageCallback,
+    FirstOutputCallback,
+    measure_stage,
+)
 from hostskeeper.session.models import (
     SessionInfo,
     SessionStatus,
@@ -113,10 +118,13 @@ class SessionManager:
         address_id: UUID,
         credential_id: UUID,
         alias: str | None = None,
+        on_stage: ConnectionStageCallback | None = None,
+        on_first_output: FirstOutputCallback | None = None,
     ) -> SessionInfo:
-        self._vault.get_host(host_id)
-        address = self._vault.get_address(address_id)
-        credential = self._vault.get_credential(credential_id)
+        with measure_stage(on_stage, "validate_selection"):
+            self._vault.get_host(host_id)
+            address = self._vault.get_address(address_id)
+            credential = self._vault.get_credential(credential_id)
         if address.host_id != host_id or credential.host_id != host_id:
             raise SessionError("address/credential must belong to host")
 
@@ -137,7 +145,11 @@ class SessionManager:
             self._sessions[session_id] = state
 
         try:
-            self._connect_state(state)
+            self._connect_state(
+                state,
+                on_stage=on_stage,
+                on_first_output=on_first_output,
+            )
         except Exception:
             with self._lock:
                 state.info = SessionInfo(
@@ -396,7 +408,13 @@ class SessionManager:
             state.info = self._with_status(state.info, SessionStatus.DISCONNECTED)
             return state.info
 
-    def reconnect(self, session_id: UUID) -> SessionInfo:
+    def reconnect(
+        self,
+        session_id: UUID,
+        *,
+        on_stage: ConnectionStageCallback | None = None,
+        on_first_output: FirstOutputCallback | None = None,
+    ) -> SessionInfo:
         with self._lock:
             state = self._require(session_id)
             if state.info.status == SessionStatus.CLOSED:
@@ -406,7 +424,11 @@ class SessionManager:
                 state.shell.close()
                 state.shell = None
             state.info = self._with_status(state.info, SessionStatus.CONNECTING)
-        self._connect_state(state)
+        self._connect_state(
+            state,
+            on_stage=on_stage,
+            on_first_output=on_first_output,
+        )
         return self.get(session_id)
 
     def close(self, session_id: UUID) -> None:
@@ -549,16 +571,26 @@ class SessionManager:
             time.sleep(0.1)
         raise TimeoutError(f"timeout waiting for {needle!r}; got: {collected!r}")
 
-    def _connect_state(self, state: _SessionState) -> None:
-        address = self._vault.get_address(state.info.address_id)
-        credential = self._vault.get_credential(state.info.credential_id)
+    def _connect_state(
+        self,
+        state: _SessionState,
+        *,
+        on_stage: ConnectionStageCallback | None = None,
+        on_first_output: FirstOutputCallback | None = None,
+    ) -> None:
+        with measure_stage(on_stage, "load_connection_parameters"):
+            address = self._vault.get_address(state.info.address_id)
+            credential = self._vault.get_credential(state.info.credential_id)
         if address.knock_enabled and address.knock_steps:
-            perform_knock(
-                address.host,
-                [KnockStep.from_dict(s) for s in address.knock_steps],
-                delay_ms=address.knock_delay_ms,
-                pause_ms=address.knock_pause_ms,
-            )
+            with measure_stage(on_stage, "port_knock"):
+                perform_knock(
+                    address.host,
+                    [KnockStep.from_dict(s) for s in address.knock_steps],
+                    delay_ms=address.knock_delay_ms,
+                    pause_ms=address.knock_pause_ms,
+                )
+        elif on_stage is not None:
+            on_stage("port_knock", 0.0, "skipped")
         use_agent = credential.auth_type == AUTH_OPENSSH_CONFIG
         params = SshConnectParams(
             hostname=address.host,
@@ -577,7 +609,12 @@ class SessionManager:
             look_for_keys=use_agent,
             connect_timeout_sec=self._connect_timeout_sec,
         )
-        shell = SshShell(params, state.buffer)
+        shell = SshShell(
+            params,
+            state.buffer,
+            on_stage=on_stage,
+            on_first_output=on_first_output,
+        )
         shell.connect()
         with self._lock:
             state.shell = shell

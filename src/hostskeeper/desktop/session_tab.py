@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from hostskeeper.desktop.terminal_widget import TerminalWidget
+from hostskeeper.runtime.connection_debug import ConnectionTrace
 from hostskeeper.session.manager import SessionManager, SessionStateError
 from hostskeeper.session.models import SessionStatus
 
@@ -41,6 +43,8 @@ class _OpenTabWorker(QObject):
         address_id: UUID,
         credential_id: UUID,
         alias: str | None,
+        *,
+        trace: ConnectionTrace | None = None,
     ) -> None:
         super().__init__()
         self._sessions = sessions
@@ -48,6 +52,7 @@ class _OpenTabWorker(QObject):
         self._address_id = address_id
         self._credential_id = credential_id
         self._alias = alias
+        self._trace = trace
 
     @Slot()
     def run(self) -> None:
@@ -57,6 +62,12 @@ class _OpenTabWorker(QObject):
                 address_id=self._address_id,
                 credential_id=self._credential_id,
                 alias=self._alias,
+                on_stage=self._trace.stage if self._trace is not None else None,
+                on_first_output=(
+                    self._trace.first_pty_output
+                    if self._trace is not None
+                    else None
+                ),
             )
             self.finished.emit(info)
         except Exception as exc:  # noqa: BLE001
@@ -67,15 +78,30 @@ class _ReconnectWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, sessions: SessionManager, session_id: UUID) -> None:
+    def __init__(
+        self,
+        sessions: SessionManager,
+        session_id: UUID,
+        *,
+        trace: ConnectionTrace | None = None,
+    ) -> None:
         super().__init__()
         self._sessions = sessions
         self._session_id = session_id
+        self._trace = trace
 
     @Slot()
     def run(self) -> None:
         try:
-            info = self._sessions.reconnect(self._session_id)
+            info = self._sessions.reconnect(
+                self._session_id,
+                on_stage=self._trace.stage if self._trace is not None else None,
+                on_first_output=(
+                    self._trace.first_pty_output
+                    if self._trace is not None
+                    else None
+                ),
+            )
             self.finished.emit(info)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -92,6 +118,8 @@ class SessionTab(QWidget):
         *,
         mcp_host: str = "0.0.0.0",
         mcp_port: int = 8765,
+        connection_trace: ConnectionTrace | None = None,
+        connection_debug_enabled: Callable[[], bool] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -99,6 +127,10 @@ class SessionTab(QWidget):
         self.session_id = session_id
         self._mcp_host = mcp_host
         self._mcp_port = mcp_port
+        self._connection_trace = connection_trace
+        self._connection_debug_enabled = (
+            connection_debug_enabled or (lambda: False)
+        )
         self._cursor = "0"
         self._thread: QThread | None = None
         self._worker: QObject | None = None
@@ -316,7 +348,17 @@ class SessionTab(QWidget):
         # No QObject parent; keep Python refs so GC cannot kill the worker.
         thread = QThread()
         thread.setObjectName("hostskeeper-reconnect")
-        worker = _ReconnectWorker(self._sessions, self.session_id)
+        trace = (
+            ConnectionTrace("tab_reconnect")
+            if self._connection_debug_enabled()
+            else None
+        )
+        self._connection_trace = trace
+        worker = _ReconnectWorker(
+            self._sessions,
+            self.session_id,
+            trace=trace,
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         # QueuedConnection: plain Python lambdas run on the emitter thread and
@@ -339,12 +381,16 @@ class SessionTab(QWidget):
         self._term.reset()
         self._skip_buffer_to_end()
         self._on_term_resize(self._term.cols, self._term.rows)
+        if self._connection_trace is not None:
+            self._connection_trace.milestone("tab_ready")
         self.refresh_chrome()
         self.status_changed.emit()
         self._term.setFocus()
 
     @Slot(str)
     def _on_reconnect_fail(self, msg: str) -> None:
+        if self._connection_trace is not None:
+            self._connection_trace.milestone("connect_failed", "failed")
         QMessageBox.critical(self, "Reconnect failed", msg)
         self.refresh_chrome()
 

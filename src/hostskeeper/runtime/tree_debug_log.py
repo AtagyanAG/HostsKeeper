@@ -1,9 +1,10 @@
-"""Per-process debug log for tree expand/collapse (crash hunting).
+"""Per-process debug log for tree diagnostics and optional connection timing.
 
 Log file: ``hostskeeper-tree-<pid>.log`` in the application launch directory
 (frozen: next to the exe; otherwise process cwd). Each process starts a fresh
 file. On clean shutdown the file is closed and deleted (crash leaves it for
 inspection). ``faulthandler`` is enabled on the same file for native crashes.
+Connection timing records are added only when enabled in Options.
 """
 
 from __future__ import annotations

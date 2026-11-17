@@ -12,6 +12,11 @@ from dataclasses import dataclass
 import paramiko
 
 from hostskeeper.session.buffer import OutputBuffer
+from hostskeeper.session.diagnostics import (
+    ConnectionStageCallback,
+    FirstOutputCallback,
+    measure_stage,
+)
 
 
 @dataclass(frozen=True)
@@ -30,9 +35,18 @@ class SshConnectParams:
 class SshShell:
     """Owns Paramiko client + shell channel and a reader thread."""
 
-    def __init__(self, params: SshConnectParams, buffer: OutputBuffer) -> None:
+    def __init__(
+        self,
+        params: SshConnectParams,
+        buffer: OutputBuffer,
+        *,
+        on_stage: ConnectionStageCallback | None = None,
+        on_first_output: FirstOutputCallback | None = None,
+    ) -> None:
         self._params = params
         self._buffer = buffer
+        self._on_stage = on_stage
+        self._on_first_output = on_first_output
         self._client: paramiko.SSHClient | None = None
         self._channel: paramiko.Channel | None = None
         self._reader: threading.Thread | None = None
@@ -54,21 +68,23 @@ class SshShell:
         # v1: auto-add host keys for lab use; harden with known_hosts later.
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-        pkey = self._load_pkey()
+        with measure_stage(self._on_stage, "prepare_authentication"):
+            pkey = self._load_pkey()
         timeout = max(1.0, float(self._params.connect_timeout_sec))
         try:
-            client.connect(
-                hostname=self._params.hostname,
-                port=self._params.port,
-                username=self._params.username,
-                password=self._params.password,
-                pkey=pkey,
-                look_for_keys=self._params.look_for_keys,
-                allow_agent=self._params.allow_agent,
-                timeout=timeout,
-                banner_timeout=timeout,
-                auth_timeout=timeout,
-            )
+            with measure_stage(self._on_stage, "ssh_transport_and_auth"):
+                client.connect(
+                    hostname=self._params.hostname,
+                    port=self._params.port,
+                    username=self._params.username,
+                    password=self._params.password,
+                    pkey=pkey,
+                    look_for_keys=self._params.look_for_keys,
+                    allow_agent=self._params.allow_agent,
+                    timeout=timeout,
+                    banner_timeout=timeout,
+                    auth_timeout=timeout,
+                )
         except (TimeoutError, socket.timeout) as exc:
             client.close()
             raise RuntimeError(
@@ -82,7 +98,8 @@ class SshShell:
                     f"Tab connect timed out after {int(timeout)}s"
                 ) from exc
             raise
-        channel = client.invoke_shell(term="xterm", width=120, height=40)
+        with measure_stage(self._on_stage, "open_pty_shell"):
+            channel = client.invoke_shell(term="xterm", width=120, height=40)
         channel.settimeout(0.0)
         with self._lock:
             self._client = client
@@ -92,7 +109,8 @@ class SshShell:
         self._reader = threading.Thread(
             target=self._read_loop, name="hostskeeper-ssh-reader", daemon=True
         )
-        self._reader.start()
+        with measure_stage(self._on_stage, "start_output_reader"):
+            self._reader.start()
 
     def write(self, text: str) -> None:
         with self._lock:
@@ -185,6 +203,7 @@ class SshShell:
         if channel is None:
             self._dead.set()
             return
+        first_output = True
         try:
             while not self._stop.is_set():
                 if channel.closed:
@@ -195,11 +214,17 @@ class SshShell:
                     if not data:
                         break
                     self._buffer.append(data.decode("utf-8", errors="replace"))
+                    if first_output and self._on_first_output is not None:
+                        self._on_first_output()
+                    first_output = False
                     got = True
                 if channel.recv_stderr_ready():
                     data = channel.recv_stderr(4096)
                     if data:
                         self._buffer.append(data.decode("utf-8", errors="replace"))
+                        if first_output and self._on_first_output is not None:
+                            self._on_first_output()
+                        first_output = False
                     got = True
                 if not got:
                     time.sleep(0.05)
