@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.scripts_render import analyze_script, render_script
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session import SessionManager
+from hostskeeper.session.manager import _SessionState
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
 from hostskeeper.vault import (
     Address,
@@ -423,7 +425,22 @@ def test_scripts_visibility_flag_gates_mcp_access(tmp_path: Path) -> None:
     visible = vault.add_script(
         Script(name="public", body="echo public", mcp_enabled=True)
     )
-    service = McpToolService(SessionManager(vault), vault)
+    sessions = SessionManager(vault)
+    session = SessionInfo(
+        id=uuid4(),
+        alias="test-session",
+        status=SessionStatus.LIVE,
+        host_id=None,
+        address_id=uuid4(),
+        credential_id=uuid4(),
+        target=SessionTarget.TAB,
+        mcp_enabled=True,
+        approve_enabled=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    with sessions._lock:
+        sessions._sessions[session.id] = _SessionState(info=session)
+    service = McpToolService(sessions, vault)
     access = McpAccess(mode="stdio")
 
     listed = service.scripts_list(access)["scripts"]
@@ -447,7 +464,12 @@ def test_scripts_visibility_flag_gates_mcp_access(tmp_path: Path) -> None:
     assert update_error.value.code == "not_found"
 
     with pytest.raises(McpToolError) as run_error:
-        service.scripts_run(access, script_id=str(hidden.id))
+        service.scripts_run(
+            access,
+            request_id=str(uuid4()),
+            script_id=str(hidden.id),
+            alias=session.alias,
+        )
     assert run_error.value.code == "not_found"
 
     with pytest.raises(McpToolError) as delete_error:
@@ -510,18 +532,26 @@ def test_scripts_create_run_http_scope(tmp_path: Path) -> None:
     assert any(s["name"] == "say" for s in listed["scripts"])
 
     marker = "scripts-ok"
-    service.scripts_run(
+    accepted = service.scripts_run(
         http,
+        request_id=str(uuid4()),
         name="say",
         params={"tag": marker},
     )
-    got = sessions.wait_for_output(info.id, f"hostskeeper-{marker}", timeout=15.0)
-    assert f"hostskeeper-{marker}" in got.data
+    assert accepted["state"] == "accepted"
+    result = service.scripts_run_wait(
+        http,
+        run_id=accepted["run_id"],
+        timeout_sec=15,
+    )
+    assert result["state"] == "succeeded"
+    assert f"hostskeeper-{marker}" in result["stdout"]["data"]
 
     # HTTP cannot target another session id
     with pytest.raises(McpToolError) as scope:
         service.scripts_run(
             http,
+            request_id=str(uuid4()),
             name="say",
             params={"tag": "x"},
             session_id="00000000-0000-0000-0000-000000000099",

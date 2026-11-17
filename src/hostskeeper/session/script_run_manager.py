@@ -8,6 +8,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from math import isfinite
 from typing import Callable
 from uuid import UUID, uuid4
 
@@ -278,7 +279,14 @@ class ScriptRunManager:
         stderr_cursor: str | None = None,
         max_chars: int = SCRIPT_RUN_OUTPUT_RESPONSE_DEFAULT_CHARS,
     ) -> ScriptRunSnapshot:
-        timeout = min(max(float(timeout_sec), 0.0), SCRIPT_RUN_WAIT_MAX_SEC)
+        if (
+            isinstance(timeout_sec, bool)
+            or not isinstance(timeout_sec, (int, float))
+            or not isfinite(timeout_sec)
+            or not 0 <= timeout_sec <= SCRIPT_RUN_WAIT_MAX_SEC
+        ):
+            raise ValueError("timeout_sec is outside the configured limit")
+        timeout = float(timeout_sec)
         budget = self._validate_output_budget(max_chars)
         with self._condition:
             record = self._require(session_id, run_id)

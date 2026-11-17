@@ -14,6 +14,11 @@ from hostskeeper import __version__
 from hostskeeper.mcp.context import get_access
 from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.service import McpToolService
+from hostskeeper.session.script_run_manager import (
+    SCRIPT_RUN_OUTPUT_RESPONSE_DEFAULT_CHARS,
+    SCRIPT_RUN_OUTPUT_RESPONSE_MAX_CHARS,
+    SCRIPT_RUN_WAIT_MAX_SEC,
+)
 
 
 SessionId = Annotated[
@@ -31,6 +36,16 @@ HostId = Annotated[
 GroupId = Annotated[str | None, Field(description="Group ID from groups_list.")]
 ScriptId = Annotated[str | None, Field(description="Script ID from scripts_list.")]
 NoteId = Annotated[str | None, Field(description="Note ID from notes_list.")]
+RunId = Annotated[str, Field(description="Run ID returned by scripts_run.")]
+RequestId = Annotated[
+    str,
+    Field(
+        description=(
+            "Client-generated UUID for this launch intent. Reuse it only to safely "
+            "retry the same launch request."
+        )
+    ),
+]
 Cursor = Annotated[
     str | None,
     Field(description="Cursor returned by the previous session_read/session_subscribe call."),
@@ -76,6 +91,18 @@ _PTY_WRITE = ToolAnnotations(
     idempotentHint=False,
     openWorldHint=True,
 )
+_SCRIPT_RUN = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+_RUN_CANCEL = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
 
 
 _INSTRUCTIONS = (
@@ -84,11 +111,14 @@ _INSTRUCTIONS = (
     "pass the selector to each session tool. session_info reports status and the "
     "current screen snapshot. session_read starts at the retained buffer beginning "
     "when cursor is omitted; pass its returned cursor to continue reading. "
-    "session_write and scripts_run require Approve on that session. Success means "
-    "text was sent to the interactive PTY, not that a command completed or "
-    "succeeded; use session_read or session_subscribe to inspect shared output. "
-    "submit=true sends Enter; submit=false types without Enter. Use scripts_list "
-    "and select a script by id before scripts_get or scripts_run. "
+    "session_write requires Approve and sends text to the interactive PTY; it "
+    "does not report command completion. scripts_run also requires Approve, but "
+    "runs only a saved, visible script on an isolated SSH exec channel and returns "
+    "a run_id, not a completion result. Use scripts_run_wait/status for its "
+    "separate bounded stdout/stderr and state; scripts_run_cancel cannot guarantee "
+    "the remote process stopped. Use session_read or session_subscribe only for "
+    "the shared PTY. submit=true sends Enter; submit=false types without Enter. "
+    "Use scripts_list and select a script by id before scripts_get or scripts_run. "
     "Use scripts_validate to check a draft before saving it. "
     "Host-bound scripts require an MCP-enabled open tab for that host. "
     "Tool failures are returned with isError=true; use "
@@ -459,8 +489,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         except McpToolError as exc:
             _raise_tool_error(exc)
 
-    @mcp.tool(annotations=_PTY_WRITE)
+    @mcp.tool(annotations=_SCRIPT_RUN)
     def scripts_run(
+        request_id: RequestId,
         script_id: ScriptId = None,
         name: Annotated[str | None, Field(description="Exact script name if script_id is not supplied.")] = None,
         host_id: HostId = None,
@@ -470,27 +501,126 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         ] = None,
         session_id: SessionId = None,
         alias: SessionAlias = None,
-        submit: Annotated[bool, Field(description="Send Enter after writing the rendered script.")] = True,
     ) -> dict[str, Any]:
-        """Render a script and write it into a live session's PTY.
+        """Start a saved MCP-visible script in an isolated SSH exec channel.
 
-        Requires Approve on the target session. Select by script_id when names
-        may be duplicated. Host-bound scripts can run only on a session for the
-        same host. Required missing parameters or unknown placeholders fail before
-        any text is written. Success confirms the rendered text was sent to the
-        PTY; it does not report command completion or exit status. Use
-        session_read or session_subscribe to inspect shared output.
+        Requires Approve on the selected live MCP-enabled tab. Only saved scripts
+        can run; arbitrary commands cannot be supplied. Host-bound scripts are
+        restricted to a tab for the same host. `request_id` must be a UUID and
+        makes retries idempotent. The accepted response is not an execution result;
+        use scripts_run_wait/status to inspect completion and bounded output.
         """
         try:
             return service.scripts_run(
                 get_access(),
+                request_id=request_id,
                 script_id=script_id,
                 name=name,
                 host_id=host_id,
                 params=params,
                 session_id=session_id,
                 alias=alias,
-                submit=submit,
+            )
+        except McpToolError as exc:
+            _raise_tool_error(exc)
+
+    @mcp.tool(annotations=_READ_ONLY)
+    def scripts_run_status(
+        run_id: RunId,
+        session_id: SessionId = None,
+        alias: SessionAlias = None,
+    ) -> dict[str, Any]:
+        """Read a saved script run's lifecycle metadata.
+
+        The run's original session must still be visible to this client. Approve
+        is not required for status; use session_id/alias when a session selector
+        is needed.
+        """
+        try:
+            return service.scripts_run_status(
+                get_access(),
+                run_id=run_id,
+                session_id=session_id,
+                alias=alias,
+            )
+        except McpToolError as exc:
+            _raise_tool_error(exc)
+
+    @mcp.tool(annotations=_READ_ONLY)
+    def scripts_run_wait(
+        run_id: RunId,
+        session_id: SessionId = None,
+        alias: SessionAlias = None,
+        timeout_sec: Annotated[
+            float,
+            Field(
+                ge=0,
+                le=SCRIPT_RUN_WAIT_MAX_SEC,
+                description=(
+                    f"Maximum wait in seconds; default {SCRIPT_RUN_WAIT_MAX_SEC:g}, "
+                    f"allowed range 0..{SCRIPT_RUN_WAIT_MAX_SEC:g}."
+                ),
+            ),
+        ] = SCRIPT_RUN_WAIT_MAX_SEC,
+        stdout_cursor: Annotated[
+            str | None,
+            Field(description="Cursor from the previous stdout chunk; omit to read from the beginning."),
+        ] = None,
+        stderr_cursor: Annotated[
+            str | None,
+            Field(description="Cursor from the previous stderr chunk; omit to read from the beginning."),
+        ] = None,
+        max_chars: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=SCRIPT_RUN_OUTPUT_RESPONSE_MAX_CHARS,
+                description=(
+                    "Combined stdout/stderr characters to return; default "
+                    f"{SCRIPT_RUN_OUTPUT_RESPONSE_DEFAULT_CHARS}, maximum "
+                    f"{SCRIPT_RUN_OUTPUT_RESPONSE_MAX_CHARS}."
+                ),
+            ),
+        ] = SCRIPT_RUN_OUTPUT_RESPONSE_DEFAULT_CHARS,
+    ) -> dict[str, Any]:
+        """Wait briefly for run state/output changes and return bounded new output.
+
+        A wait timeout does not change run state. stdout and stderr have separate
+        cursors. This tool is read-only and does not require Approve.
+        """
+        try:
+            return service.scripts_run_wait(
+                get_access(),
+                run_id=run_id,
+                session_id=session_id,
+                alias=alias,
+                timeout_sec=timeout_sec,
+                stdout_cursor=stdout_cursor,
+                stderr_cursor=stderr_cursor,
+                max_chars=max_chars,
+            )
+        except McpToolError as exc:
+            _raise_tool_error(exc)
+
+    @mcp.tool(annotations=_RUN_CANCEL)
+    def scripts_run_cancel(
+        run_id: RunId,
+        session_id: SessionId = None,
+        alias: SessionAlias = None,
+    ) -> dict[str, Any]:
+        """Request cancellation of a script run without using the shared PTY.
+
+        Closing the local SSH channel does not prove that the remote process
+        stopped; the result can remain unknown with process_may_continue=true.
+        This request does not require Approve but remains scoped to the original
+        MCP-enabled session.
+        """
+        try:
+            return service.scripts_run_cancel(
+                get_access(),
+                run_id=run_id,
+                session_id=session_id,
+                alias=alias,
             )
         except McpToolError as exc:
             _raise_tool_error(exc)

@@ -81,11 +81,27 @@ def test_streamable_http_metadata_errors_and_structured_results(
             for property_schema in tool["inputSchema"].get("properties", {}).values()
         )
         by_name = {tool["name"]: tool for tool in tools}
+        assert {
+            "scripts_run",
+            "scripts_run_status",
+            "scripts_run_wait",
+            "scripts_run_cancel",
+        } <= by_name.keys()
         assert by_name["session_list"]["outputSchema"]["type"] == "object"
         assert by_name["session_list"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_compare"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_validate"]["annotations"]["readOnlyHint"] is True
         assert by_name["groups_delete"]["annotations"]["destructiveHint"] is True
+        run_tool = by_name["scripts_run"]
+        assert "request_id" in run_tool["inputSchema"]["required"]
+        assert "submit" not in run_tool["inputSchema"]["properties"]
+        assert run_tool["annotations"]["destructiveHint"] is True
+        assert run_tool["annotations"]["idempotentHint"] is True
+        assert by_name["scripts_run_status"]["annotations"]["readOnlyHint"] is True
+        wait_properties = by_name["scripts_run_wait"]["inputSchema"]["properties"]
+        assert wait_properties["timeout_sec"]["maximum"] == 30
+        assert wait_properties["max_chars"]["maximum"] == 65536
+        assert by_name["scripts_run_cancel"]["annotations"]["readOnlyHint"] is False
 
         success = client.post(
             "/mcp?key=protocol-test-key",

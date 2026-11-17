@@ -6,20 +6,28 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import unified_diff
+from math import isfinite
 from typing import Any, Literal
 from uuid import UUID
 
 from hostskeeper.mcp.app_key import keys_match
 from hostskeeper.mcp.errors import McpToolError
-from hostskeeper.mcp.scripts_render import analyze_script, render_script
+from hostskeeper.mcp.scripts_render import analyze_script
 from hostskeeper.session.manager import (
     McpClientBusyError,
     McpUnauthorizedError,
     SessionManager,
+    SessionNotFoundError,
     SessionStateError,
     ScriptRunStartError,
 )
 from hostskeeper.session.models import SessionInfo, SessionStatus
+from hostskeeper.session.script_run_manager import (
+    SCRIPT_RUN_OUTPUT_RESPONSE_DEFAULT_CHARS,
+    SCRIPT_RUN_OUTPUT_RESPONSE_MAX_CHARS,
+    SCRIPT_RUN_WAIT_MAX_SEC,
+    ScriptRunNotFoundError,
+)
 from hostskeeper.session.script_runs import ScriptRunInfo, ScriptRunOrigin
 from hostskeeper.vault.errors import NotFoundError, ValidationError
 from hostskeeper.vault.models import Group, Host, Note, Script, ScriptParameter
@@ -34,6 +42,7 @@ _SCRIPT_NOT_FOUND_MESSAGE = (
     "Host scripts require an MCP-enabled open tab for that host."
 )
 _SCRIPT_DIFF_MAX_CHARS = 20_000
+_RUN_NOT_FOUND_MESSAGE = "run not found in client scope"
 
 
 @dataclass
@@ -43,6 +52,31 @@ class McpAccess:
     client_id: str | None = None
     # True when authenticated with stable LAN app key (sees all mcp-enabled tabs).
     gateway: bool = False
+
+
+def _script_run_info_to_dict(info: ScriptRunInfo) -> dict[str, Any]:
+    return {
+        "run_id": str(info.run_id),
+        "request_id": str(info.request_id),
+        "session_id": str(info.session_id),
+        "script_id": str(info.script_id),
+        "state": info.state.value,
+        "accepted_at": info.accepted_at.isoformat(),
+        "started_at": info.started_at.isoformat() if info.started_at else None,
+        "updated_at": info.updated_at.isoformat(),
+        "completed_at": info.completed_at.isoformat() if info.completed_at else None,
+        "exit_code": info.exit_code,
+        "error_code": info.error_code.value if info.error_code else None,
+        "process_may_continue": info.process_may_continue,
+        "stdout_chars_retained": info.output.stdout_chars_retained,
+        "stderr_chars_retained": info.output.stderr_chars_retained,
+        "stdout_truncated": info.output.stdout_truncated,
+        "stderr_truncated": info.output.stderr_truncated,
+    }
+
+
+def _buffer_read_to_dict(data: str, cursor: str, truncated: bool) -> dict[str, Any]:
+    return {"cursor": cursor, "data": data, "truncated": truncated}
 
 
 class McpToolService:
@@ -704,41 +738,29 @@ class McpToolService:
         self,
         access: McpAccess,
         *,
+        request_id: str,
         script_id: str | None = None,
         name: str | None = None,
         host_id: str | None = None,
         params: dict[str, str] | None = None,
         session_id: str | None = None,
         alias: str | None = None,
-        submit: bool = True,
     ) -> dict[str, Any]:
-        script = self._find_script(
-            access, id=script_id, name=name, host_id=host_id
-        )
-        rendered = render_script(script, params)
-        if script.host_id is not None:
-            info = self._resolve_session(
-                access, session_id=session_id, alias=alias
-            )
-            if info.host_id != script.host_id:
-                raise McpToolError(
-                    "client_scope",
-                    "host script can only run in a session of that host",
-                )
-            return self.session_write(
-                access,
-                text=rendered,
-                session_id=str(info.id),
-                alias=None,
-                submit=submit,
-            )
-        return self.session_write(
+        run = self._start_script_run(
             access,
-            text=rendered,
+            request_id=request_id,
+            script_id=script_id,
+            name=name,
+            host_id=host_id,
+            params=params,
             session_id=session_id,
             alias=alias,
-            submit=submit,
         )
+        return {
+            "run_id": str(run.run_id),
+            "state": "accepted",
+            "accepted_at": run.accepted_at.isoformat(),
+        }
 
     def _start_script_run(
         self,
@@ -752,10 +774,10 @@ class McpToolService:
         session_id: str | None = None,
         alias: str | None = None,
     ) -> ScriptRunInfo:
-        """Internal isolated-run path; not registered as an MCP tool yet."""
+        """Start a visible saved script on an isolated SSH exec channel."""
         try:
             request_uuid = UUID(request_id)
-        except ValueError as exc:
+        except (ValueError, AttributeError, TypeError) as exc:
             raise McpToolError("invalid_args", "invalid request_id") from exc
 
         info = self._resolve_session(
@@ -797,6 +819,128 @@ class McpToolService:
             raise McpToolError(exc.code, str(exc)) from exc
         except ScriptRunStartError as exc:
             raise McpToolError(exc.code) from exc
+        except SessionNotFoundError as exc:
+            raise McpToolError("not_found", "session not found in MCP scope") from exc
+
+    def scripts_run_status(
+        self,
+        access: McpAccess,
+        *,
+        run_id: str,
+        session_id: str | None = None,
+        alias: str | None = None,
+    ) -> dict[str, Any]:
+        run, _ = self._resolve_run(
+            access, run_id=run_id, session_id=session_id, alias=alias
+        )
+        return _script_run_info_to_dict(run)
+
+    def scripts_run_wait(
+        self,
+        access: McpAccess,
+        *,
+        run_id: str,
+        session_id: str | None = None,
+        alias: str | None = None,
+        timeout_sec: float = SCRIPT_RUN_WAIT_MAX_SEC,
+        stdout_cursor: str | None = None,
+        stderr_cursor: str | None = None,
+        max_chars: int = SCRIPT_RUN_OUTPUT_RESPONSE_DEFAULT_CHARS,
+    ) -> dict[str, Any]:
+        info, session = self._resolve_run(
+            access, run_id=run_id, session_id=session_id, alias=alias
+        )
+        self._validate_run_wait_args(timeout_sec, max_chars)
+        try:
+            snapshot = self._sessions.wait_script_run(
+                session.id,
+                info.run_id,
+                timeout_sec=timeout_sec,
+                stdout_cursor=stdout_cursor,
+                stderr_cursor=stderr_cursor,
+                max_chars=max_chars,
+            )
+        except (ScriptRunNotFoundError, SessionNotFoundError) as exc:
+            raise McpToolError("not_found", _RUN_NOT_FOUND_MESSAGE) from exc
+        except ValueError as exc:
+            raise McpToolError("invalid_args", str(exc)) from exc
+        result = _script_run_info_to_dict(snapshot.info)
+        result.update(
+            {
+                "stdout": _buffer_read_to_dict(
+                    snapshot.stdout.data,
+                    snapshot.stdout.cursor,
+                    snapshot.stdout.truncated,
+                ),
+                "stderr": _buffer_read_to_dict(
+                    snapshot.stderr.data,
+                    snapshot.stderr.cursor,
+                    snapshot.stderr.truncated,
+                ),
+                "wait_timed_out": snapshot.wait_timed_out,
+            }
+        )
+        return result
+
+    def scripts_run_cancel(
+        self,
+        access: McpAccess,
+        *,
+        run_id: str,
+        session_id: str | None = None,
+        alias: str | None = None,
+    ) -> dict[str, Any]:
+        info, session = self._resolve_run(
+            access, run_id=run_id, session_id=session_id, alias=alias
+        )
+        try:
+            run = self._sessions.cancel_script_run(session.id, info.run_id)
+        except (ScriptRunNotFoundError, SessionNotFoundError) as exc:
+            raise McpToolError("not_found", _RUN_NOT_FOUND_MESSAGE) from exc
+        return _script_run_info_to_dict(run)
+
+    def _resolve_run(
+        self,
+        access: McpAccess,
+        *,
+        run_id: str,
+        session_id: str | None,
+        alias: str | None,
+    ) -> tuple[ScriptRunInfo, SessionInfo]:
+        try:
+            run_uuid = UUID(run_id)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise McpToolError("invalid_args", "invalid run_id") from exc
+        session = self._resolve_session(
+            access, session_id=session_id, alias=alias
+        )
+        try:
+            run = self._sessions.get_script_run(session.id, run_uuid)
+        except (ScriptRunNotFoundError, SessionNotFoundError) as exc:
+            raise McpToolError("not_found", _RUN_NOT_FOUND_MESSAGE) from exc
+        return run, session
+
+    @staticmethod
+    def _validate_run_wait_args(timeout_sec: float, max_chars: int) -> None:
+        if (
+            isinstance(timeout_sec, bool)
+            or not isinstance(timeout_sec, (int, float))
+            or not isfinite(timeout_sec)
+            or not 0 <= timeout_sec <= SCRIPT_RUN_WAIT_MAX_SEC
+        ):
+            raise McpToolError(
+                "invalid_args",
+                f"timeout_sec must be between 0 and {SCRIPT_RUN_WAIT_MAX_SEC:g}",
+            )
+        if (
+            isinstance(max_chars, bool)
+            or not isinstance(max_chars, int)
+            or not 1 <= max_chars <= SCRIPT_RUN_OUTPUT_RESPONSE_MAX_CHARS
+        ):
+            raise McpToolError(
+                "invalid_args",
+                "max_chars must be between 1 and 65536",
+            )
 
     def groups_list(
         self,

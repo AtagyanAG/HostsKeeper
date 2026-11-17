@@ -127,6 +127,105 @@ def test_internal_start_uses_saved_script_and_isolated_channel(stack) -> None:
     assert sessions.read(info.id).data == ""
 
 
+def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> None:
+    _, sessions, service, _, script, info, shell = stack
+    access = McpAccess(mode="stdio")
+    request_id = str(uuid4())
+
+    accepted = service.scripts_run(
+        access,
+        request_id=request_id,
+        script_id=str(script.id),
+        params={"value": "ok"},
+        alias=info.alias,
+    )
+    assert accepted["state"] == "accepted"
+    assert accepted["run_id"]
+    assert accepted["accepted_at"]
+
+    retried = service.scripts_run(
+        access,
+        request_id=request_id,
+        script_id=str(uuid4()),
+        alias=info.alias,
+    )
+    assert retried["run_id"] == accepted["run_id"]
+    assert len(shell.commands) == 1
+
+    result = service.scripts_run_wait(
+        access,
+        run_id=accepted["run_id"],
+        alias=info.alias,
+        timeout_sec=1,
+        max_chars=64,
+    )
+    assert result["state"] == "succeeded"
+    assert result["exit_code"] == 0
+    assert result["stdout"] == {
+        "cursor": "0",
+        "data": "",
+        "truncated": False,
+    }
+    assert result["stderr"]["data"] == ""
+    assert result["wait_timed_out"] is False
+    assert service.scripts_run_status(
+        access,
+        run_id=accepted["run_id"],
+        alias=info.alias,
+    )["state"] == "succeeded"
+    assert sessions.read(info.id).data == ""
+
+
+def test_run_wait_validates_timeout_and_inspection_is_scoped(stack) -> None:
+    _, _, service, _, script, info, _shell = stack
+    access = McpAccess(mode="stdio")
+    accepted = service.scripts_run(
+        access,
+        request_id=str(uuid4()),
+        script_id=str(script.id),
+        alias=info.alias,
+    )
+
+    with pytest.raises(McpToolError) as invalid_timeout:
+        service.scripts_run_wait(
+            access,
+            run_id=accepted["run_id"],
+            alias=info.alias,
+            timeout_sec=31,
+        )
+    assert invalid_timeout.value.code == "invalid_args"
+
+    with pytest.raises(McpToolError) as not_found:
+        service.scripts_run_status(
+            access,
+            run_id=str(uuid4()),
+            alias=info.alias,
+        )
+    assert not_found.value.code == "not_found"
+
+
+def test_cancel_is_scoped_and_does_not_require_approve(stack) -> None:
+    _, sessions, service, _, script, info, shell = stack
+    shell.channel._exit_code = None
+    access = McpAccess(mode="stdio")
+    accepted = service.scripts_run(
+        access,
+        request_id=str(uuid4()),
+        script_id=str(script.id),
+        alias=info.alias,
+    )
+
+    sessions.set_approve(info.id, enabled=False)
+    cancelled = service.scripts_run_cancel(
+        access,
+        run_id=accepted["run_id"],
+        alias=info.alias,
+    )
+    assert cancelled["state"] == "unknown"
+    assert cancelled["exit_code"] is None
+    assert shell.channel.closed is True
+
+
 def test_start_requires_approve_and_disabled_script_is_not_visible(stack) -> None:
     vault, sessions, service, _, script, info, shell = stack
     sessions.set_approve(info.id, enabled=False)
