@@ -291,7 +291,7 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
     tmp_path: Path,
 ) -> None:
     vault = Vault.create(tmp_path / "duplicate.vault", "test-pass")
-    host = vault.add_host(Host(name="lab"))
+    host = vault.add_host(Host(name="lab", mcp_enabled=True))
     hidden_host = vault.add_host(Host(name="hidden"))
     template = vault.add_script(
         Script(name="deploy", body="echo template", mcp_enabled=True)
@@ -380,7 +380,7 @@ def test_scripts_list_scope_and_duplicate_name_requires_selector(
         unavailable_messages.append(str(unavailable.value))
     assert unavailable_messages[0] == unavailable_messages[1]
     assert "refresh scripts_list" in unavailable_messages[0]
-    assert "MCP-enabled open tab" in unavailable_messages[0]
+    assert "access to their host" in unavailable_messages[0]
     assert str(hidden_script.id) not in unavailable_messages[0]
     compare_errors = []
     for script_id in (str(hidden_script.id), str(uuid4())):
@@ -488,7 +488,7 @@ def test_scripts_visibility_flag_gates_mcp_access(tmp_path: Path) -> None:
 )
 def test_scripts_create_run_http_scope(tmp_path: Path) -> None:
     vault = Vault.create(tmp_path / "scripts.vault", "test-pass")
-    host = vault.add_host(Host(name=VAULT_HOST_NAME))
+    host = vault.add_host(Host(name=VAULT_HOST_NAME, mcp_enabled=True))
     address = vault.add_address(
         Address(host_id=host.id, host=HOST, port=PORT, label="lan")
     )

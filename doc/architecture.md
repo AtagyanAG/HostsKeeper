@@ -32,7 +32,7 @@
    Целевой контракт `scripts_run` использует отдельный SSH `exec`-канал поверх
    transport этой вкладки; он не разделяет shell-контекст PTY и не предоставляет
    общий инструмент удалённого выполнения команд.
-4. **Явная выдача доступа** — MCP ON на вкладке + LAN app key (или legacy per-tab token).
+4. **Явная выдача доступа** — Host MCP permission + LAN app key (или legacy per-tab token); Host-local Script/Note требуют отдельного MCP-флага.
 5. **Единый remote-first MCP** — localhost и LAN отличаются только адресом.
 
 ## Компоненты
@@ -94,9 +94,9 @@
 
 | Канал | Bind / запуск | Auth | Видимость |
 |-------|---------------|------|-----------|
-| HTTP gateway | LAN (и localhost) | стабильный app key (`?key=` / заголовок) | все mcp-enabled вкладки + MCP-enabled скрипты в доступном host scope |
-| HTTP legacy | LAN (и localhost) | per-tab token в URL | одна вкладка + MCP-enabled скрипты в доступном host scope |
-| stdio | процесс MCP | доверенный локальный | все MCP-вкладки + MCP-enabled скрипты в доступном host scope |
+| HTTP gateway | LAN (и localhost) | стабильный app key (`?key=` / заголовок) | вкладки разрешённых Host + Host data и отдельно разрешённые Script/Note |
+| HTTP legacy | LAN (и localhost) | per-tab token в URL | одна вкладка и ресурсы её разрешённого Host |
+| stdio | процесс MCP | доверенный локальный | вкладки разрешённых Host + их Host data и отдельно разрешённые Script/Note |
 
 Ограничение legacy: **1 клиент на tab-token**. Gateway: выбор вкладки через `alias` / `session_attach`.
 
@@ -109,7 +109,7 @@
 ```text
 Человек: Host → Address + Credential → «Открыть во вкладке»
        → alias (или автопредложение)
-       → MCP ON → session_list / session_attach (Cursor mcp.json с app key)
+       → Host MCP ON → session_list / session_attach (Cursor mcp.json с app key)
 ИИ:     HTTP connect (app key) → session_list → session_attach(alias)
        → subscribe / read / write / scripts_*
 ```
@@ -126,9 +126,9 @@ Core: если Approve выкл → сразу approve_required (чтение т
 
 ```text
 PTY/SSH down → status=disconnected
-MCP button остаётся, token жив
+Host MCP permission remains enabled, token stays valid
 Tools → ошибка disconnected
-Человек: Reconnect в UI → status=live, тот же token
+Человек: Reconnect в UI → status=live, тот же token while Host MCP remains enabled
 ```
 
 ## Границы доверия
@@ -141,7 +141,7 @@ Tools → ошибка disconnected
 | Целевой хост | Обычный SSH; ПО сейфа туда не ставится |
 | Чат Cursor | Alias; mcp.json держит стабильный app key |
 
-App key в mcp.json — осознанный риск LAN v1; вкладки всё равно требуют MCP ON.
+App key в mcp.json — осознанный риск LAN v1; вкладки и Host data требуют Host MCP.
 
 ## Расширяемость (после v1)
 

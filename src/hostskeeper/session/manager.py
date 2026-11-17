@@ -105,7 +105,9 @@ class SessionManager:
     def suggest_alias(self, host_id: UUID, credential_id: UUID) -> str:
         host = self._vault.get_host(host_id)
         cred = self._vault.get_credential(credential_id)
-        base = f"{host.name}-{cred.username}".replace(" ", "-").lower()
+        host_part = host.name.replace(" ", "-")
+        user_part = cred.username.replace(" ", "-").lower()
+        base = f"{host_part}-{user_part}"
         with self._lock:
             n = self._alias_counts.get(base, 0) + 1
             self._alias_counts[base] = n
@@ -122,7 +124,7 @@ class SessionManager:
         on_first_output: FirstOutputCallback | None = None,
     ) -> SessionInfo:
         with measure_stage(on_stage, "validate_selection"):
-            self._vault.get_host(host_id)
+            host = self._vault.get_host(host_id)
             address = self._vault.get_address(address_id)
             credential = self._vault.get_credential(credential_id)
         if address.host_id != host_id or credential.host_id != host_id:
@@ -145,6 +147,12 @@ class SessionManager:
             self._sessions[session_id] = state
 
         try:
+            if host.mcp_enabled:
+                try:
+                    self.enable_mcp(session_id)
+                except SessionStateError:
+                    if self._vault.get_host(host_id).mcp_enabled:
+                        raise
             self._connect_state(
                 state,
                 on_stage=on_stage,
@@ -448,11 +456,13 @@ class SessionManager:
             del self._sessions[session_id]
 
     def enable_mcp(self, session_id: UUID) -> str:
-        """Enable MCP for tab session; return durable per-tab token."""
+        """Enable MCP for a tab whose host has granted MCP access."""
         with self._lock:
             state = self._require(session_id)
             if state.info.target != SessionTarget.TAB:
                 raise SessionStateError("MCP is only available for tab sessions")
+            if not self._host_mcp_enabled(state):
+                raise SessionStateError("MCP is not enabled for this host")
             if state.mcp_token is None:
                 state.mcp_token = secrets.token_urlsafe(24)
             state.info = self._copy_info(state.info, mcp_enabled=True)
@@ -464,14 +474,32 @@ class SessionManager:
             self._script_runs.on_execution_access_revoked(session_id)
             state.mcp_token = None
             state.mcp_client_id = None
-            state.info = self._copy_info(state.info, mcp_enabled=False)
+            state.info = self._copy_info(
+                state.info, mcp_enabled=False, approve_enabled=False
+            )
             return state.info
+
+    def sync_host_mcp_access(self, host_id: UUID) -> None:
+        """Apply the saved host-level MCP permission to all its open tabs."""
+        with self._lock:
+            host = self._vault.get_host(host_id)
+            for session_id, state in list(self._sessions.items()):
+                if state.info.host_id != host_id:
+                    continue
+                if host.mcp_enabled:
+                    if not state.info.mcp_enabled:
+                        self.enable_mcp(session_id)
+                elif state.info.mcp_enabled or state.info.approve_enabled:
+                    self.disable_mcp(session_id)
 
     def enable_mcp_all(self) -> list[str]:
         tokens: list[str] = []
         with self._lock:
             for session_id, state in list(self._sessions.items()):
-                if state.info.target == SessionTarget.TAB:
+                if (
+                    state.info.target == SessionTarget.TAB
+                    and self._host_mcp_enabled(state)
+                ):
                     tokens.append(self.enable_mcp(session_id))
         return tokens
 
@@ -484,6 +512,10 @@ class SessionManager:
         """Standing MCP write permission (Approve checkbox)."""
         with self._lock:
             state = self._require(session_id)
+            if enabled and (
+                not state.info.mcp_enabled or not self._host_mcp_enabled(state)
+            ):
+                raise SessionStateError("Approve requires MCP access to this host")
             state.info = self._copy_info(state.info, approve_enabled=enabled)
             if not enabled:
                 self._script_runs.on_execution_access_revoked(session_id)
@@ -510,7 +542,11 @@ class SessionManager:
     def mcp_url(self, session_id: UUID, *, host: str, port: int) -> str:
         with self._lock:
             state = self._require(session_id)
-            if not state.info.mcp_enabled or not state.mcp_token:
+            if (
+                not state.info.mcp_enabled
+                or not state.mcp_token
+                or not self._host_mcp_enabled(state)
+            ):
                 raise SessionStateError("MCP is not enabled for this session")
             token = state.mcp_token
         return f"http://{host}:{port}/mcp?token={token}"
@@ -545,7 +581,7 @@ class SessionManager:
             result = []
             for state in self._sessions.values():
                 self._refresh_status(state)
-                if state.info.mcp_enabled:
+                if state.info.mcp_enabled and self._host_mcp_enabled(state):
                     result.append(state.info)
             return result
 
@@ -630,9 +666,19 @@ class SessionManager:
         if not token:
             raise McpUnauthorizedError("unauthorized")
         for state in self._sessions.values():
-            if state.info.mcp_enabled and state.mcp_token == token:
+            if (
+                state.info.mcp_enabled
+                and state.mcp_token == token
+                and self._host_mcp_enabled(state)
+            ):
                 return state
         raise McpUnauthorizedError("unauthorized")
+
+    def _host_mcp_enabled(self, state: _SessionState) -> bool:
+        try:
+            return self._vault.get_host(state.info.host_id).mcp_enabled
+        except NotFoundError:
+            return False
 
     def _refresh_status(self, state: _SessionState) -> None:
         if state.info.status in (SessionStatus.CLOSED, SessionStatus.CONNECTING):

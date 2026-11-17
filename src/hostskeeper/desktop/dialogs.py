@@ -89,6 +89,8 @@ ConnectTarget = Callable[[UUID, UUID, UUID], None]
 # host_id, address_id, credential_id, rendered_body, mode, script_id
 RunScriptTarget = Callable[[UUID, UUID, UUID, str, str, UUID], None]
 ListHostSessions = Callable[[UUID], list[tuple[UUID, str]]]  # (session_id, alias)
+HostMcpChanged = Callable[[Host], None]
+
 
 class HostDialog(QDialog):
     def __init__(
@@ -103,6 +105,7 @@ class HostDialog(QDialog):
         on_winscp: ConnectTarget | None = None,
         on_run_script: RunScriptTarget | None = None,
         list_host_sessions: ListHostSessions | None = None,
+        on_host_mcp_changed: HostMcpChanged | None = None,
     ) -> None:
         super().__init__(parent)
         from hostskeeper.desktop.host_scripts_panel import HostScriptsPanel
@@ -115,10 +118,17 @@ class HostDialog(QDialog):
         self._on_winscp = on_winscp
         self._on_run_script = on_run_script
         self._list_host_sessions = list_host_sessions
+        self._on_host_mcp_changed = on_host_mcp_changed
         self.setWindowTitle(host.name if host else "New Host")
         self._name = QLineEdit(host.name if host else "")
         self._description = QLineEdit(host.description or "" if host else "")
         self._tags = QLineEdit(_tags_to_text(host.tags) if host else "")
+        self._mcp = QCheckBox("MCP")
+        self._mcp.setToolTip(
+            "Allow MCP access to this host, its data, and its open SSH tabs."
+        )
+        self._mcp.setChecked(bool(host.mcp_enabled) if host else False)
+        self._mcp.toggled.connect(self._on_host_mcp_toggled)
         self._default_addr = QComboBox()
         self._default_cred = QComboBox()
         self._edit_addr_btn = QPushButton("Edit")
@@ -241,12 +251,16 @@ class HostDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        # Timestamps above tabs (Host dialog chrome).
+        # Timestamps and host MCP permission above tabs.
         self._ts_label = _timestamps_label(
             host.created_at if host is not None else None,
             host.updated_at if host is not None else None,
         )
-        layout.addWidget(self._ts_label)
+        metadata = QHBoxLayout()
+        metadata.addWidget(self._ts_label)
+        metadata.addStretch(1)
+        metadata.addWidget(self._mcp)
+        layout.addLayout(metadata)
         layout.addWidget(tabs)
         layout.addSpacing(8)
         layout.addWidget(buttons)
@@ -284,6 +298,9 @@ class HostDialog(QDialog):
         self._name.setText(host.name)
         self._description.setText(host.description or "")
         self._tags.setText(_tags_to_text(host.tags))
+        self._mcp.blockSignals(True)
+        self._mcp.setChecked(host.mcp_enabled)
+        self._mcp.blockSignals(False)
         self._profile.setPlainText(host.profile or "")
         if self._notes_preview.isChecked():
             self._refresh_notes_preview()
@@ -410,6 +427,37 @@ class HostDialog(QDialog):
         self._host = self._vault.update_host(h)
         self._result = self._host
 
+    def _on_host_mcp_toggled(self, enabled: bool) -> None:
+        if self._host is None:
+            return
+        try:
+            host = self._vault.get_host(self._host.id)
+            if host.mcp_enabled == enabled:
+                return
+            host.mcp_enabled = enabled
+            saved = self._vault.update_host(host)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "MCP permissions", str(exc))
+            self._mcp.blockSignals(True)
+            self._mcp.setChecked(not enabled)
+            self._mcp.blockSignals(False)
+            return
+        self._host = saved
+        self._result = saved
+        self._ts_label.setText(
+            f"Created: {_format_ts(saved.created_at)}    "
+            f"Modified: {_format_ts(saved.updated_at)}"
+        )
+        if self._on_host_mcp_changed is not None:
+            try:
+                self._on_host_mcp_changed(saved)
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.warning(
+                    self,
+                    "MCP permissions",
+                    f"Permission was saved, but open sessions could not be updated:\n{exc}",
+                )
+
     def _on_address_index_changed(self, index: int) -> None:
         if index < 0 or self._selected_uuid(self._default_addr) is None:
             self._sync_edit_buttons()
@@ -485,25 +533,33 @@ class HostDialog(QDialog):
             QMessageBox.warning(self, "HostsKeeper", "Name is required.")
             return None
         if self._host is None:
-            return self._vault.add_host(
+            saved = self._vault.add_host(
                 Host(
                     name=name,
                     description=self._description.text().strip() or None,
                     profile=self._profile.toPlainText().strip() or None,
+                    mcp_enabled=self._mcp.isChecked(),
                     notes_preview=self._notes_preview.isChecked(),
                     tags=_tags_from_text(self._tags.text()),
                     group_id=self._group_id,
                 )
             )
+            if self._on_host_mcp_changed is not None:
+                self._on_host_mcp_changed(saved)
+            return saved
         h = self._host
         h.name = name
         h.description = self._description.text().strip() or None
         h.profile = self._profile.toPlainText().strip() or None
+        h.mcp_enabled = self._mcp.isChecked()
         h.notes_preview = self._notes_preview.isChecked()
         h.tags = _tags_from_text(self._tags.text())
         h.default_address_id = self._selected_uuid(self._default_addr)
         h.default_credential_id = self._selected_uuid(self._default_cred)
-        return self._vault.update_host(h)
+        saved = self._vault.update_host(h)
+        if self._on_host_mcp_changed is not None:
+            self._on_host_mcp_changed(saved)
+        return saved
 
     def _launch_connect(self, kind: str) -> None:
         if self._host is None:
@@ -1237,7 +1293,7 @@ class ScriptDialog(QDialog):
         self._mcp = QCheckBox("MCP")
         self._mcp.setToolTip(
             "When checked, this script is available via MCP. "
-            "Host scripts also require an open MCP-enabled tab for that host."
+            "Host scripts also require MCP access to their host."
         )
         self._mcp.setChecked(bool(script.mcp_enabled) if script else False)
         self._name = QLineEdit(script.name if script else "")

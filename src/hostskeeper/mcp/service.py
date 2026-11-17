@@ -39,7 +39,7 @@ AccessMode = Literal["stdio", "http"]
 _UNSET = object()
 _SCRIPT_NOT_FOUND_MESSAGE = (
     "script not found or not visible to this client; refresh scripts_list. "
-    "Host scripts require an MCP-enabled open tab for that host."
+    "Host scripts require MCP access to their host and their own MCP flag."
 )
 _SCRIPT_DIFF_MAX_CHARS = 20_000
 _RUN_NOT_FOUND_MESSAGE = "run not found in client scope"
@@ -50,7 +50,7 @@ class McpAccess:
     mode: AccessMode
     token: str | None = None
     client_id: str | None = None
-    # True when authenticated with stable LAN app key (sees all mcp-enabled tabs).
+    # True when authenticated with the stable LAN app key.
     gateway: bool = False
 
 
@@ -318,7 +318,7 @@ class McpToolService:
         alias: str | None = None,
         host_id: str | None = None,
     ) -> dict[str, Any]:
-        """Read Host Notes (profile). Requires open MCP tab for that host."""
+        """Read Host Notes (profile) for a host with MCP access."""
         host = self._resolve_accessible_host(
             access, session_id=session_id, alias=alias, host_id=host_id
         )
@@ -341,7 +341,7 @@ class McpToolService:
         alias: str | None = None,
         host_id: str | None = None,
     ) -> dict[str, Any]:
-        """Write Host Notes (profile). No Approve. Requires open MCP tab for host."""
+        """Write Host Notes (profile). No Approve; requires host MCP access."""
         host = self._resolve_accessible_host(
             access, session_id=session_id, alias=alias, host_id=host_id
         )
@@ -361,7 +361,7 @@ class McpToolService:
     def scripts_list(self, access: McpAccess) -> dict[str, Any]:
         self._assert_access(access)
         visible_sessions = self._visible_sessions(access)
-        visible_hosts = {session.host_id for session in visible_sessions}
+        visible_hosts = self._accessible_host_ids(access)
         host_aliases: dict[UUID, str] = {}
         for session in visible_sessions:
             host_aliases.setdefault(session.host_id, session.alias)
@@ -504,7 +504,7 @@ class McpToolService:
             if resolved_host not in self._accessible_host_ids(access):
                 raise McpToolError(
                     "client_scope",
-                    "host scripts require an open MCP tab on that host",
+                    "host scripts require MCP access to that host",
                 )
         resolved_group: UUID | None = None
         if group_id:
@@ -665,7 +665,7 @@ class McpToolService:
             if resolved_host not in self._accessible_host_ids(access):
                 raise McpToolError(
                     "client_scope",
-                    "host notes require an open MCP tab on that host",
+                    "host notes require MCP access to that host",
                 )
         resolved_group: UUID | None = None
         if group_id:
@@ -1015,7 +1015,7 @@ class McpToolService:
             if resolved_host not in self._accessible_host_ids(access):
                 raise McpToolError(
                     "client_scope",
-                    "host groups require an open MCP tab on that host",
+                    "host groups require MCP access to that host",
                 )
         resolved_parent: UUID | None = None
         if parent_id:
@@ -1079,9 +1079,19 @@ class McpToolService:
 
     def _accessible_host_ids(self, access: McpAccess) -> set[UUID]:
         try:
-            return {s.host_id for s in self._visible_sessions(access)}
+            visible_sessions = self._visible_sessions(access)
         except McpToolError:
             return set()
+        allowed_hosts = {
+            host.id for host in self._vault.list_hosts() if host.mcp_enabled
+        }
+        if access.mode == "http" and not access.gateway:
+            return {
+                session.host_id
+                for session in visible_sessions
+                if session.host_id in allowed_hosts
+            }
+        return allowed_hosts
 
     def _resolve_accessible_host(
         self,
@@ -1094,7 +1104,7 @@ class McpToolService:
         accessible = self._accessible_host_ids(access)
         if not accessible:
             raise McpToolError(
-                "not_found", "no MCP-enabled tab; open a tab and enable MCP"
+                "not_found", "no host with MCP access is available in this scope"
             )
         resolved: UUID | None = None
         if host_id:
@@ -1153,7 +1163,7 @@ class McpToolService:
             if note.host_id is not None and note.host_id not in visible_hosts:
                 raise McpToolError(
                     "client_scope",
-                    "host notes require an open MCP tab on that host",
+                    "host notes require MCP access to that host",
                 )
             return note
         if name:

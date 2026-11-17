@@ -77,6 +77,7 @@ class Host:
     group_id: UUID | None = None
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
+    mcp_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +85,7 @@ class Host:
             "name": self.name,
             "description": self.description,
             "profile": self.profile,
+            "mcp_enabled": bool(self.mcp_enabled),
             "notes_preview": bool(self.notes_preview),
             "tags": list(self.tags),
             "default_address_id": str(self.default_address_id)
@@ -104,6 +106,7 @@ class Host:
             name=data["name"],
             description=data.get("description"),
             profile=data.get("profile"),
+            mcp_enabled=bool(data.get("mcp_enabled", False)),
             notes_preview=bool(data.get("notes_preview", False)),
             tags=list(data.get("tags") or []),
             default_address_id=UUID(data["default_address_id"])

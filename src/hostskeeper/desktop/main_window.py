@@ -14,12 +14,14 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -55,7 +57,7 @@ from hostskeeper.runtime.mcp_http import ensure_mcp_http, stop_mcp_http
 from hostskeeper.runtime.settings import AppSettings, default_vault_path
 from hostskeeper.runtime.state import AppState
 from hostskeeper.runtime.tree_debug_log import keep_log_on_exit
-from hostskeeper.vault import Group
+from hostskeeper.vault import Group, Host
 from hostskeeper.vault.errors import NotFoundError
 
 
@@ -228,6 +230,13 @@ class MainWindow(QMainWindow):
         hosts_wrap = QWidget()
         hosts_layout = QVBoxLayout(hosts_wrap)
         hosts_layout.setContentsMargins(0, 0, 0, 0)
+        hosts_mcp_row = QHBoxLayout()
+        hosts_mcp_row.addStretch(1)
+        self._hosts_mcp_bulk = QPushButton("MCP select all")
+        self._hosts_mcp_bulk.setEnabled(False)
+        self._hosts_mcp_bulk.clicked.connect(self._toggle_all_host_mcp)
+        hosts_mcp_row.addWidget(self._hosts_mcp_bulk)
+        hosts_layout.addLayout(hosts_mcp_row)
         self._hosts_tree = DropTreeWidget()
         self._hosts_tree.setHeaderHidden(True)
         self._hosts_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -257,6 +266,13 @@ class MainWindow(QMainWindow):
         scripts_wrap = QWidget()
         scripts_layout = QVBoxLayout(scripts_wrap)
         scripts_layout.setContentsMargins(0, 0, 0, 0)
+        scripts_mcp_row = QHBoxLayout()
+        scripts_mcp_row.addStretch(1)
+        self._scripts_mcp_bulk = QPushButton("MCP select all")
+        self._scripts_mcp_bulk.setEnabled(False)
+        self._scripts_mcp_bulk.clicked.connect(self._toggle_all_template_mcp)
+        scripts_mcp_row.addWidget(self._scripts_mcp_bulk)
+        scripts_layout.addLayout(scripts_mcp_row)
         self._scripts_tree = DropTreeWidget()
         self._scripts_tree.setHeaderHidden(True)
         self._scripts_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -864,6 +880,8 @@ class MainWindow(QMainWindow):
         self._connected_vault_path = None
         self._set_connect_checked(False)
         self._act_close_all_tabs.setEnabled(False)
+        self._hosts_mcp_bulk.setEnabled(False)
+        self._scripts_mcp_bulk.setEnabled(False)
         self._hosts_root.takeChildren()
         self._scripts_root.takeChildren()
         self._hosts_root.addChild(QTreeWidgetItem(["(not connected)"]))
@@ -956,7 +974,7 @@ class MainWindow(QMainWindow):
 
         for host in sorted(vault.list_hosts(), key=lambda h: h.name.lower()):
             host_item = QTreeWidgetItem([host.name])
-            host_item.setIcon(0, host_icon())
+            host_item.setIcon(0, host_icon(mcp_enabled=host.mcp_enabled))
             host_item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
@@ -1026,6 +1044,7 @@ class MainWindow(QMainWindow):
 
         apply_group_folder_icons(self._hosts_root, group_kinds=_GROUP_FOLDER_KINDS)
         apply_group_folder_icons(self._scripts_root, group_kinds=_GROUP_FOLDER_KINDS)
+        self._update_mcp_bulk_buttons()
         self._hosts_root.setExpanded(vault.tree_root_expanded("hosts"))
         self._scripts_root.setExpanded(vault.tree_root_expanded("scripts"))
         self._apply_filter(self._search.text())
@@ -1436,7 +1455,12 @@ class MainWindow(QMainWindow):
     def _new_host(self, group_id: UUID | None = None) -> None:
         if not self._state.unlocked:
             return
-        dlg = HostDialog(self._vault(), parent=self, group_id=group_id)
+        dlg = HostDialog(
+            self._vault(),
+            parent=self,
+            group_id=group_id,
+            on_host_mcp_changed=self._sync_host_mcp_access,
+        )
         if dlg.exec() == HostDialog.DialogCode.Accepted:
             self.refresh_tree()
 
@@ -1454,6 +1478,7 @@ class MainWindow(QMainWindow):
             on_winscp=lambda h, a, c: self._launch_external_for("winscp", h, a, c),
             on_run_script=self._run_script_target,
             list_host_sessions=self._list_host_sessions,
+            on_host_mcp_changed=self._sync_host_mcp_access,
         )
         if dlg.exec() == HostDialog.DialogCode.Accepted:
             self.refresh_tree()
@@ -1464,6 +1489,73 @@ class MainWindow(QMainWindow):
             self.refresh_tree()
             self._select_workspace_item(NodeKind.HOST, host_id)
             self._on_tree_selection()
+
+    def _sync_host_mcp_access(self, host: Host) -> None:
+        if self._state.sessions is not None:
+            self._state.sessions.sync_host_mcp_access(host.id)
+            self._refresh_status_sessions()
+
+    def _update_mcp_bulk_buttons(self) -> None:
+        enabled = self._state.unlocked and self._state.vault is not None
+        self._hosts_mcp_bulk.setEnabled(enabled)
+        self._scripts_mcp_bulk.setEnabled(enabled)
+        if not enabled:
+            return
+        vault = self._vault()
+        self._hosts_mcp_bulk.setText(
+            "MCP clear all"
+            if any(host.mcp_enabled for host in vault.list_hosts())
+            else "MCP select all"
+        )
+        scripts = vault.list_scripts(only_templates=True)
+        notes = vault.list_notes(only_templates=True)
+        self._scripts_mcp_bulk.setText(
+            "MCP clear all"
+            if any(script.mcp_enabled for script in scripts)
+            or any(note.mcp_enabled for note in notes)
+            else "MCP select all"
+        )
+
+    def _toggle_all_host_mcp(self) -> None:
+        if not self._state.unlocked:
+            return
+        vault = self._vault()
+        hosts = vault.list_hosts()
+        if not hosts:
+            return
+        enabled = not any(host.mcp_enabled for host in hosts)
+        try:
+            vault.bulk_set_mcp_flags(
+                enabled=enabled, host_ids=(host.id for host in hosts)
+            )
+            if self._state.sessions is not None:
+                for host in hosts:
+                    self._state.sessions.sync_host_mcp_access(host.id)
+                self._refresh_status_sessions()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "MCP permissions", str(exc))
+        self.refresh_tree()
+
+    def _toggle_all_template_mcp(self) -> None:
+        if not self._state.unlocked:
+            return
+        vault = self._vault()
+        scripts = vault.list_scripts(only_templates=True)
+        notes = vault.list_notes(only_templates=True)
+        if not scripts and not notes:
+            return
+        enabled = not any(script.mcp_enabled for script in scripts) and not any(
+            note.mcp_enabled for note in notes
+        )
+        try:
+            vault.bulk_set_mcp_flags(
+                enabled=enabled,
+                script_ids=(script.id for script in scripts),
+                note_ids=(note.id for note in notes),
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "MCP permissions", str(exc))
+        self.refresh_tree()
 
     def _delete_host(self, host_id: UUID) -> None:
         try:
@@ -1816,8 +1908,6 @@ class MainWindow(QMainWindow):
         tab = SessionTab(
             self._state.sessions,
             session_id,
-            mcp_host=self._state.mcp_host,
-            mcp_port=self._state.mcp_port,
             connection_trace=trace,
             connection_debug_enabled=lambda: self._connection_debug_enabled,
             parent=self._tabs,

@@ -12,6 +12,7 @@ from hostskeeper.vault import (
     Group,
     Host,
     InvalidPasswordError,
+    Note,
     Script,
     ScriptParameter,
     Vault,
@@ -52,6 +53,7 @@ def test_create_roundtrip_survives_reopen(tmp_path: Path) -> None:
     hosts = again.list_hosts()
     assert len(hosts) == 1
     assert hosts[0].name == "lab"
+    assert hosts[0].mcp_enabled is False
     assert hosts[0].default_address_id == address.id
     assert hosts[0].default_credential_id == credential.id
     assert again.get_address(address.id).host == "10.0.0.1"
@@ -60,6 +62,40 @@ def test_create_roundtrip_survives_reopen(tmp_path: Path) -> None:
     assert cred.private_key is not None
     assert cred.auth_type == "password"
     assert again.get_script_by_name("uptime").body == "uptime"
+
+
+def test_host_mcp_defaults_off_and_migrates_legacy_dict() -> None:
+    host = Host(name="legacy")
+    assert host.mcp_enabled is False
+
+    legacy_data = host.to_dict()
+    legacy_data.pop("mcp_enabled")
+    restored = Host.from_dict(legacy_data)
+    assert restored.mcp_enabled is False
+
+
+def test_bulk_set_mcp_flags_persists_all_entity_types(tmp_path: Path) -> None:
+    path = tmp_path / "bulk-mcp.vault"
+    vault = Vault.create(path, "pw")
+    host = vault.add_host(Host(name="lab"))
+    script = vault.add_script(Script(name="run", body="true"))
+    note = vault.add_note(Note(name="docs", body="text"))
+
+    changed = vault.bulk_set_mcp_flags(
+        enabled=True,
+        host_ids=[host.id],
+        script_ids=[script.id],
+        note_ids=[note.id],
+    )
+    assert changed is True
+    assert vault.bulk_set_mcp_flags(enabled=True, host_ids=[host.id]) is False
+    vault.lock()
+
+    reopened = Vault(path)
+    reopened.unlock("pw")
+    assert reopened.get_host(host.id).mcp_enabled is True
+    assert reopened.get_script(script.id).mcp_enabled is True
+    assert reopened.get_note(note.id).mcp_enabled is True
 
 
 def test_credential_auth_type_validation(tmp_path: Path) -> None:

@@ -70,6 +70,12 @@ class HostScriptsPanel(QWidget):
         self._tree.itemCollapsed.connect(self._on_item_collapsed)
         # Modal dialog: no cross-window DnD from main Scripts tree.
 
+        mcp_row = QHBoxLayout()
+        mcp_row.addStretch(1)
+        self._btn_mcp_bulk = QPushButton("MCP select all")
+        self._btn_mcp_bulk.clicked.connect(self._toggle_all_mcp)
+        mcp_row.addWidget(self._btn_mcp_bulk)
+
         btn_row = QHBoxLayout()
         self._btn_add = QPushButton("Add Script")
         self._btn_note = QPushButton("Add Note")
@@ -97,6 +103,7 @@ class HostScriptsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._hint)
+        layout.addLayout(mcp_row)
         layout.addWidget(self._tree, stretch=1)
         layout.addLayout(btn_row)
         self._set_actions_enabled(self._enabled)
@@ -140,6 +147,7 @@ class HostScriptsPanel(QWidget):
             self._tree.clear()
 
     def _set_actions_enabled(self, enabled: bool) -> None:
+        self._btn_mcp_bulk.setEnabled(enabled)
         self._btn_add.setEnabled(enabled)
         self._btn_note.setEnabled(enabled)
         self._btn_group.setEnabled(enabled)
@@ -316,7 +324,35 @@ class HostScriptsPanel(QWidget):
             top = self._tree.topLevelItem(i)
             if top is not None:
                 apply_group_folder_icons(top, group_kinds=_SCRIPT_GROUP_KINDS)
+        scripts = self._vault.list_scripts(host_id=host_id)
+        notes = self._vault.list_notes(host_id=host_id)
+        self._btn_mcp_bulk.setText(
+            "MCP clear all"
+            if any(script.mcp_enabled for script in scripts)
+            or any(note.mcp_enabled for note in notes)
+            else "MCP select all"
+        )
         self._sync_selection_actions()
+
+    def _toggle_all_mcp(self) -> None:
+        if not self._enabled or self._host_id is None:
+            return
+        scripts = self._vault.list_scripts(host_id=self._host_id)
+        notes = self._vault.list_notes(host_id=self._host_id)
+        if not scripts and not notes:
+            return
+        enabled = not any(script.mcp_enabled for script in scripts) and not any(
+            note.mcp_enabled for note in notes
+        )
+        try:
+            self._vault.bulk_set_mcp_flags(
+                enabled=enabled,
+                script_ids=(script.id for script in scripts),
+                note_ids=(note.id for note in notes),
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "MCP permissions", str(exc))
+        self.refresh()
 
     def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
         self._persist_expand(item, True)

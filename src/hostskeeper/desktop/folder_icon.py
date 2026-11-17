@@ -63,8 +63,8 @@ def note_icon(*, mcp_enabled: bool = False) -> QIcon:
     return QIcon(pm)
 
 
-def host_icon() -> QIcon:
-    """16×16 host/server glyph."""
+def host_icon(*, mcp_enabled: bool = False) -> QIcon:
+    """16×16 host/server glyph; disabled MCP visibility has a thin red frame."""
     size = 16
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
@@ -80,6 +80,7 @@ def host_icon() -> QIcon:
     painter.drawRect(4, 3, 8, 5)
     painter.drawLine(5, 13, 11, 13)
     painter.drawLine(8, 11, 8, 13)
+    _draw_mcp_disabled_border(painter, mcp_enabled=mcp_enabled)
     painter.end()
     return QIcon(pm)
 

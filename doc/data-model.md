@@ -30,6 +30,7 @@ Session (runtime, не в vault):
 | name | string | Отображаемое имя |
 | description | string? | Короткое описание (вкладка Host) |
 | profile | string? | Notes: свободный текст о хосте (ОС, пакеты, runtimes…); вкладка Notes |
+| mcp_enabled | bool | Host MCP permission; default false, включая migration старых vault без поля |
 | notes_preview | bool | UI: Preview на вкладке Notes (default false); в MCP не отдаётся |
 | tags | string[] | Теги |
 | default_address_id | UUID? | Адрес по умолчанию |
@@ -107,7 +108,7 @@ Session (runtime, не в vault):
 | mcp_enabled | bool | UI-чекбокс MCP; default false для новых UI-скриптов; legacy-скрипты без поля сохраняют видимость (true) |
 | created_at / updated_at | datetime | |
 
-MCP видит только скрипты с `mcp_enabled=true`: шаблоны доступны всегда, host-local — только при открытой MCP-вкладке этого хоста. Скрипты, созданные через MCP, сразу получают `mcp_enabled=true`; `scripts_update` не меняет этот флаг.
+MCP видит только скрипты с `mcp_enabled=true`: шаблоны доступны всегда; host-local требует также `Host.mcp_enabled=true`. Чтение и редактирование host-local ресурса не требует открытой вкладки, запуск — требует доступную живую вкладку и Approve. Скрипты, созданные через MCP, сразу получают `mcp_enabled=true`; `scripts_update` не меняет этот флаг.
 
 Удаление Host каскадно удаляет его Address/Credential/Script/Note и host-группы Scripts.
 
@@ -126,7 +127,7 @@ Markdown-лист в деревьях Scripts (не путать с Host → Not
 | preview | bool | UI: Markdown Preview (default false); в MCP не отдаётся |
 | created_at / updated_at | datetime | |
 
-MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-local при открытой MCP-вкладке). Approve не требуется. `notes_update` не меняет `mcp_enabled`.
+MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-local при включённом Host MCP). Approve не требуется. `notes_update` не меняет `mcp_enabled`.
 
 ### Parameter
 
@@ -150,14 +151,14 @@ MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | UUID | Внутренний id вкладки/сессии |
-| alias | string | Человекочитаемое имя (шапка + MCP) |
+| alias | string | Человекочитаемое имя (шапка + MCP); автогенерация сохраняет регистр имени Host |
 | host_id / address_id / credential_id | UUID | Снимок выбора |
 | target | enum | `tab` \| `putty` \| `winscp` |
 | status | enum | `connecting` \| `live` \| `disconnected` \| `closed` |
-| mcp_enabled | bool | Кнопка MCP |
-| mcp_token | secret? | Per-tab token (если mcp_enabled) |
-| mcp_client_connected | bool | Занят ли слот клиента |
-| approve_enabled | bool | Чекбокс Approve: MCP write/run (default false) |
+| mcp_enabled | bool | Runtime-видимость вкладки, производная от Host MCP permission |
+| mcp_token | secret? | Per-tab token, пока Host MCP permission включён |
+| mcp_client_connected | bool | Занят ли слот legacy-token клиента |
+| approve_enabled | bool | Чекбокс Approve: MCP write/run (default false; Host MCP off также сбрасывает его) |
 | created_at | datetime | |
 
 Для `target=putty|winscp` поля MCP не используются (или всегда `mcp_enabled=false`).

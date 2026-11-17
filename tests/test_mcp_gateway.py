@@ -20,7 +20,7 @@ from hostskeeper.mcp.http_app import create_http_app
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session.manager import SessionManager, _SessionState
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
-from hostskeeper.vault import Vault
+from hostskeeper.vault import Host, Vault
 
 
 APP_KEY = "test-gateway-key-abc"
@@ -28,11 +28,12 @@ APP_KEY = "test-gateway-key-abc"
 
 def _inject_live_mcp_session(sessions: SessionManager, *, alias: str) -> SessionInfo:
     sid = uuid4()
+    host = sessions._vault.add_host(Host(name=alias, mcp_enabled=True))
     info = SessionInfo(
         id=sid,
         alias=alias,
         status=SessionStatus.LIVE,
-        host_id=uuid4(),
+        host_id=host.id,
         address_id=uuid4(),
         credential_id=uuid4(),
         target=SessionTarget.TAB,

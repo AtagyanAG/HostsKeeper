@@ -54,13 +54,13 @@ HostsKeeper — свой продукт (vault + MCP). **Класс интерф
 - Один поиск фильтрует содержимое обоих деревьев.
 - Опционально **Open sessions** (alias + status) — удобно прыгать на вкладку.
 - Иконки типа объекта; цвет статуса у открытых сессий.
-- Скрипты и заметки без MCP-доступа отмечаются тонкой красной рамкой иконки.
+- Hosts, Scripts и Notes без MCP-доступа отмечаются тонкой красной рамкой иконки.
 - Контекстное меню: Open in Tab / PuTTY / WinSCP, Edit, Show secret (credentials).
 
 ### Центр
 
 - Tab strip с alias.
-- Активная вкладка SSH: область терминала + тонкая session chrome (MCP, Approve, Reconnect / Disconnect / Close).
+- Активная вкладка SSH: область терминала + тонкая session chrome (Approve, Reconnect / Disconnect / Close). Approve доступен только при Host MCP.
 - Вкладки launcher (если показываем факт запуска) — без PTY; либо только внешний процесс без вкладки (предпочтение v1: вкладка только для встроенного SSH).
 
 ### Лента / тулбар
@@ -70,7 +70,7 @@ HostsKeeper — свой продукт (vault + MCP). **Класс интерф
 1. **Vault** — Lock  
 2. **Connect** — Open Tab / PuTTY / WinSCP  
 3. **Session** — Reconnect / Disconnect / Close  
-4. **Close All Tabs** — закрыть все SSH-вкладки (с подтверждением); MCP — per-tab; Copy MCP config — в Options  
+4. **Close All Tabs** — закрыть все SSH-вкладки (с подтверждением); Host MCP разрешения задаются в Host Edit; Copy MCP config — в Options
 5. **Edit** — New Host / Address / Credential / Script  
 
 ### Диалоги
@@ -95,7 +95,7 @@ HostsKeeper — свой продукт (vault + MCP). **Класс интерф
 | Секреты не в MCP | В UI — отдельная кнопка reveal; в status/MCP URL — только token/alias |
 | Сессию открывает человек | Connect только из дерева/ленты |
 | Alias в шапке | Tab title + session chrome |
-| MCP per tab | Toggle на вкладке; Copy MCP config / Change MCP Key в Options |
+| MCP per host | Toggle в Host Edit; Script/Note имеют дополнительные флаги; Approve остаётся per-session |
 | Approve per session | Checkbox на chrome вкладки (standing permission) |
 | Скрипты без UI-форм params | Редактор body/`{{params}}` в properties; запуск из UI опционален в v1 |
 

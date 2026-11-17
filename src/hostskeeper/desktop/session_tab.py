@@ -116,8 +116,6 @@ class SessionTab(QWidget):
         sessions: SessionManager,
         session_id: UUID,
         *,
-        mcp_host: str = "0.0.0.0",
-        mcp_port: int = 8765,
         connection_trace: ConnectionTrace | None = None,
         connection_debug_enabled: Callable[[], bool] | None = None,
         parent=None,
@@ -125,8 +123,6 @@ class SessionTab(QWidget):
         super().__init__(parent)
         self._sessions = sessions
         self.session_id = session_id
-        self._mcp_host = mcp_host
-        self._mcp_port = mcp_port
         self._connection_trace = connection_trace
         self._connection_debug_enabled = (
             connection_debug_enabled or (lambda: False)
@@ -134,7 +130,6 @@ class SessionTab(QWidget):
         self._cursor = "0"
         self._thread: QThread | None = None
         self._worker: QObject | None = None
-        self._mcp_busy = False
         self._approve_busy = False
         self._chrome_tick = 0
 
@@ -151,11 +146,6 @@ class SessionTab(QWidget):
             for t in ("disconnected", "connected", "connecting")
         )
         self._status.setFixedWidth(_status_w + 8)
-        self._mcp = QPushButton("MCP")
-        self._mcp.setObjectName("sessionMcpToggle")
-        self._mcp.setCheckable(True)
-        self._mcp.setToolTip("Enable MCP for this tab.")
-        self._mcp.toggled.connect(self._on_mcp_toggled)
         self._approve = QPushButton("Approve")
         self._approve.setObjectName("sessionApproveToggle")
         self._approve.setCheckable(True)
@@ -178,7 +168,6 @@ class SessionTab(QWidget):
 
         chrome = QHBoxLayout()
         chrome.addWidget(self._status)
-        chrome.addWidget(self._mcp)
         chrome.addWidget(self._approve)
         chrome.addWidget(self._btn_save_log)
         chrome.addStretch(1)
@@ -224,27 +213,11 @@ class SessionTab(QWidget):
         self._btn_disconnect.setEnabled(live)
         self._btn_reconnect.setEnabled(info.status != SessionStatus.CLOSED)
         self._term.set_live(live)
-        if not self._mcp_busy and self._mcp.isChecked() != info.mcp_enabled:
-            self._mcp_busy = True
-            self._mcp.setChecked(info.mcp_enabled)
-            self._mcp_busy = False
+        self._approve.setEnabled(info.mcp_enabled)
         if not self._approve_busy and self._approve.isChecked() != info.approve_enabled:
             self._approve_busy = True
             self._approve.setChecked(info.approve_enabled)
             self._approve_busy = False
-
-    def _on_mcp_toggled(self, checked: bool) -> None:
-        if self._mcp_busy:
-            return
-        try:
-            if checked:
-                self._sessions.enable_mcp(self.session_id)
-            else:
-                self._sessions.disable_mcp(self.session_id)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "MCP", str(exc))
-        self.refresh_chrome()
-        self.status_changed.emit()
 
     def _on_approve_toggled(self, checked: bool) -> None:
         if self._approve_busy:

@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from hostskeeper.desktop.dialogs import ScriptDialog
-from hostskeeper.desktop.folder_icon import note_icon, script_icon
+from hostskeeper.desktop.folder_icon import host_icon, note_icon, script_icon
 from hostskeeper.vault import Script, Vault
 
 
@@ -32,8 +32,10 @@ def _red_pixel_count(icon) -> int:
 
 
 def test_disabled_mcp_icons_have_thin_red_frames(qapp) -> None:
+    assert _red_pixel_count(host_icon(mcp_enabled=False)) > 0
     assert _red_pixel_count(script_icon(mcp_enabled=False)) > 0
     assert _red_pixel_count(note_icon(mcp_enabled=False)) > 0
+    assert _red_pixel_count(host_icon(mcp_enabled=True)) == 0
     assert _red_pixel_count(script_icon(mcp_enabled=True)) == 0
     assert _red_pixel_count(note_icon(mcp_enabled=True)) == 0
 

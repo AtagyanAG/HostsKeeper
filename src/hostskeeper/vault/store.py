@@ -239,6 +239,43 @@ class Vault:
         self.save()
         return deepcopy(stored)
 
+    def bulk_set_mcp_flags(
+        self,
+        *,
+        enabled: bool,
+        host_ids: Iterable[UUID] = (),
+        script_ids: Iterable[UUID] = (),
+        note_ids: Iterable[UUID] = (),
+    ) -> bool:
+        """Set MCP flags in one vault write; return whether anything changed."""
+        self._require_unlocked()
+        selections = (
+            ("host", set(host_ids), self._hosts),
+            ("script", set(script_ids), self._scripts),
+            ("note", set(note_ids), self._notes),
+        )
+        for kind, ids, entities in selections:
+            missing = ids.difference(entities)
+            if missing:
+                raise NotFoundError(f"{kind} not found: {next(iter(missing))}")
+
+        changed = False
+        now = _utcnow()
+        for selection in selections:
+            ids = selection[1]
+            entities = selection[2]
+            for entity_id in ids:
+                entity = entities[entity_id]
+                if entity.mcp_enabled == enabled:
+                    continue
+                entities[entity_id] = replace(
+                    entity, mcp_enabled=enabled, updated_at=now
+                )
+                changed = True
+        if changed:
+            self.save()
+        return changed
+
     def delete_host(self, host_id: UUID) -> None:
         self._require_unlocked()
         if host_id not in self._hosts:

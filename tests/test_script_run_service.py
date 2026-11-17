@@ -75,7 +75,7 @@ class FakeShell:
 @pytest.fixture()
 def stack(tmp_path):
     vault = Vault.create(tmp_path / "runs.vault", "test-pass")
-    host = vault.add_host(Host(name="host"))
+    host = vault.add_host(Host(name="host", mcp_enabled=True))
     script = vault.add_script(
         Script(
             name="safe-script",

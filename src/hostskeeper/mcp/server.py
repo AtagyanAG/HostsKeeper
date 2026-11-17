@@ -133,7 +133,12 @@ _INSTRUCTIONS = (
     "the script, assess shell security, or guarantee compatibility with the target "
     "shell or host. If needed, explicitly ask the MCP client to call "
     "scripts_validate; tool discovery and selection are client behavior. "
-    "Host-bound scripts require an MCP-enabled open tab for that host. "
+    "MCP access is controlled by the user's Host checkbox. Open tabs of an enabled "
+    "host are visible; host-bound scripts and notes require both Host access and "
+    "their own MCP checkbox. Host data and resources can be accessed without an "
+    "open tab, but session tools and scripts_run require an open tab; scripts_run "
+    "also requires Approve. Disabling Host MCP revokes access and clears Approve "
+    "on its open tabs. "
     "Tool failures are returned with isError=true; use "
     "the error code and message to correct the request."
 )
@@ -205,9 +210,9 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         alias: SessionAlias = None,
         host_id: HostId = None,
     ) -> dict[str, Any]:
-        """Read Host Notes for a host with an MCP-enabled open tab.
+        """Read Host Notes for a host whose Host MCP checkbox is enabled.
 
-        Select by session_id or alias, or by a visible host_id. The result is
+        Select by session_id or alias, or by an accessible host_id. The result is
         free-form Notes text and contains no connection address or credentials.
         """
         try:
@@ -230,7 +235,7 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         alias: SessionAlias = None,
         host_id: HostId = None,
     ) -> dict[str, Any]:
-        """Replace Host Notes for a host with an MCP-enabled open tab.
+        """Replace Host Notes for a host whose Host MCP checkbox is enabled.
 
         This overwrites the entire Notes field; obtain user consent before changing it.
         """
@@ -341,7 +346,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     def scripts_list() -> dict[str, Any]:
         """List scripts visible to this client.
 
-        Lists MCP-enabled scripts in the client's host scope. Each entry has an
+        Lists MCP-enabled scripts in the client's host scope. Host-bound scripts
+        require both Host MCP access and the script's MCP checkbox. Each entry has an
         id, name, host_id (null for a template), parameters, tags, group_id,
         and mcp_enabled. Use the id to disambiguate same-name scripts, then call
         scripts_get.
@@ -360,8 +366,7 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
         """Read a script and its shell body.
 
         Identify by id, or by name and optionally host_id. Scripts must have
-        MCP enabled; host-bound scripts also require an MCP-enabled tab for
-        that host.
+        MCP enabled; host-bound scripts also require MCP access to their Host.
         """
         try:
             return service.scripts_get(
@@ -457,8 +462,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     ) -> dict[str, Any]:
         """Create a reusable script template or host-bound script.
 
-        Omit host_id for a template. A host-bound script requires an MCP-enabled
-        open tab on that host. MCP-created scripts are immediately visible to MCP.
+        Omit host_id for a template. Creating a host-bound script requires Host MCP
+        access; MCP-created scripts are immediately visible to MCP.
         Creating or editing scripts does not require Approve.
         """
         try:
@@ -686,8 +691,7 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     ) -> dict[str, Any]:
         """List visible groups as a tree using parent_id.
 
-        kind is scripts or hosts; host-local script groups require a visible
-        MCP-enabled tab for that host.
+        kind is scripts or hosts; host-local script groups require Host MCP access.
         """
         try:
             return service.groups_list(get_access(), kind=kind)
@@ -706,8 +710,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     ) -> dict[str, Any]:
         """Create a group in the selected tree.
 
-        For a host-local scripts group, provide host_id and keep an MCP-enabled
-        tab open for that host. parent_id nests the new group.
+        For a host-local scripts group, provide host_id with Host MCP access.
+        parent_id nests the new group.
         """
         try:
             return service.groups_create(
@@ -755,7 +759,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     def notes_list() -> dict[str, Any]:
         """List MCP-enabled notes visible to this client.
 
-        Includes templates and host-local notes for hosts with open MCP-enabled tabs.
+        Includes templates and host-local notes whose own MCP checkbox and Host
+        MCP checkbox are enabled.
         """
         try:
             return service.notes_list(get_access())
@@ -788,8 +793,8 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     ) -> dict[str, Any]:
         """Create an MCP-enabled Markdown note.
 
-        Omit host_id for a template. Host-local notes require an MCP-enabled open
-        tab for that host. This vault edit does not require session Approve.
+        Omit host_id for a template. Host-local notes require Host MCP access.
+        This vault edit does not require session Approve.
         """
         try:
             return service.notes_create(

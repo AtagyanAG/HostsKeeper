@@ -72,7 +72,9 @@ def main() -> int:
     state.unlock("check-tab-mcp")
 
     assert state.vault is not None and state.sessions is not None
-    host = state.vault.add_host(Host(name=VAULT_HOST_NAME, tags=["lab"]))
+    host = state.vault.add_host(
+        Host(name=VAULT_HOST_NAME, tags=["lab"], mcp_enabled=True)
+    )
     addr = state.vault.add_address(
         Address(host_id=host.id, host=HOST, port=PORT, label="lan")
     )

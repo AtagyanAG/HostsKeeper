@@ -11,15 +11,15 @@ from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session import SessionManager
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
-from hostskeeper.vault import Vault
+from hostskeeper.vault import Host, Vault
 
 
-def _live_info(*, approve_enabled: bool) -> SessionInfo:
+def _live_info(*, approve_enabled: bool, host_id=None) -> SessionInfo:
     return SessionInfo(
         id=uuid4(),
         alias="host-user-1",
         status=SessionStatus.LIVE,
-        host_id=uuid4(),
+        host_id=host_id or uuid4(),
         address_id=uuid4(),
         credential_id=uuid4(),
         target=SessionTarget.TAB,
@@ -69,8 +69,9 @@ def test_write_allowed_when_approve_on(service, monkeypatch) -> None:
 
 def test_set_approve_toggles_enabled(service) -> None:
     sessions, _svc = service
+    host = sessions._vault.add_host(Host(name="lab", mcp_enabled=True))
     # Inject a closed-enough session state without SSH.
-    info = _live_info(approve_enabled=False)
+    info = _live_info(approve_enabled=False, host_id=host.id)
     from hostskeeper.session.manager import _SessionState
 
     with sessions._lock:

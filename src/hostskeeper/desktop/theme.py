@@ -160,16 +160,14 @@ def os_accent_colors() -> tuple[QColor, QColor]:
 
 
 def _accent_checkable_qss(bg: QColor, fg: QColor) -> str:
-    """Checked look for session MCP/Approve only (Fusion otherwise hides accent)."""
+    """Checked look for session Approve (Fusion otherwise hides accent)."""
     border = QColor(bg).darker(115)
     return f"""
-QPushButton#sessionMcpToggle:checked,
 QPushButton#sessionApproveToggle:checked {{
     background-color: {bg.name()};
     color: {fg.name()};
     border: 1px solid {border.name()};
 }}
-QPushButton#sessionMcpToggle:checked:hover,
 QPushButton#sessionApproveToggle:checked:hover {{
     background-color: {QColor(bg).lighter(110).name()};
     color: {fg.name()};

@@ -27,7 +27,7 @@ def test_host_profile_persists(tmp_path) -> None:
 
 def test_host_profile_mcp_get_set(tmp_path) -> None:
     vault = Vault.create(tmp_path / "m.vault", "pass")
-    host = vault.add_host(Host(name="lab"))
+    host = vault.add_host(Host(name="lab", mcp_enabled=True))
     sessions = SessionManager(vault)
     sid = uuid4()
     info = SessionInfo(
@@ -71,9 +71,17 @@ def test_host_profile_mcp_get_set(tmp_path) -> None:
 
 def test_host_profile_requires_mcp_scope(tmp_path) -> None:
     vault = Vault.create(tmp_path / "n.vault", "pass")
-    host = vault.add_host(Host(name="lab", profile="x"))
+    denied_host = vault.add_host(Host(name="denied", profile="x"))
+    allowed_host = vault.add_host(
+        Host(name="allowed", profile="y", mcp_enabled=True)
+    )
     sessions = SessionManager(vault)
     service = McpToolService(sessions, vault)
     with pytest.raises(McpToolError) as exc:
-        service.host_profile_get(McpAccess(mode="stdio"), host_id=str(host.id))
+        service.host_profile_get(
+            McpAccess(mode="stdio"), host_id=str(denied_host.id)
+        )
     assert exc.value.code == "not_found"
+    assert service.host_profile_get(
+        McpAccess(mode="stdio"), host_id=str(allowed_host.id)
+    )["profile"] == "y"

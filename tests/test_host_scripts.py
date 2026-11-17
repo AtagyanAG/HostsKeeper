@@ -41,7 +41,7 @@ def test_delete_host_cascades_scripts_and_groups(tmp_path: Path) -> None:
     assert vault.list_groups(kind="scripts", host_id=host.id) == []
 
 
-def test_mcp_host_script_visibility_without_tab(tmp_path: Path) -> None:
+def test_mcp_host_script_visibility_uses_host_permission_without_tab(tmp_path: Path) -> None:
     vault = Vault.create(tmp_path / "m.vault", "pw")
     host = vault.add_host(Host(name="h"))
     vault.add_script(
@@ -62,6 +62,15 @@ def test_mcp_host_script_visibility_without_tab(tmp_path: Path) -> None:
             stdio, name="x", body="echo", host_id=str(host.id)
         )
     assert err.value.code == "client_scope"
+
+    host.mcp_enabled = True
+    vault.update_host(host)
+    listed = service.scripts_list(stdio)["scripts"]
+    assert "local" in {script["name"] for script in listed}
+    created = service.scripts_create(
+        stdio, name="x", body="echo", host_id=str(host.id)
+    )
+    assert created["host_id"] == str(host.id)
 
 
 def test_group_host_id_mismatch_rejected(tmp_path: Path) -> None:

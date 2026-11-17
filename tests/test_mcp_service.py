@@ -38,7 +38,7 @@ FORBIDDEN_FRAGMENTS = [
 @pytest.fixture()
 def lab_stack(tmp_path: Path) -> tuple[Vault, SessionManager, McpToolService]:
     vault = Vault.create(tmp_path / "mcp.vault", "test-pass")
-    host = vault.add_host(Host(name=VAULT_HOST_NAME))
+    host = vault.add_host(Host(name=VAULT_HOST_NAME, mcp_enabled=True))
     address = vault.add_address(
         Address(host_id=host.id, host=HOST, port=PORT, label="lan")
     )

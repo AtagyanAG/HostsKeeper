@@ -6,7 +6,7 @@
 
 **Local credential vault + human-gated SSH tabs for MCP/AI — not a generic remote desktop.**
 
-HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You** open SSH sessions in tabs. An AI client (e.g. Cursor) attaches only to tabs you enable for MCP — it never opens SSH itself and never receives passwords, keys, or host addresses.
+HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You** open SSH sessions in tabs and grant MCP access per Host. An AI client (e.g. Cursor) can attach only to tabs of enabled Hosts — it never opens SSH itself and never receives passwords, keys, or host addresses.
 
 | | |
 |---|---|
@@ -17,7 +17,7 @@ HostsKeeper keeps host credentials and shell scripts on your Windows PC. **You**
 
 1. Unlock a local encrypted vault (hosts, addresses, credentials, scripts).
 2. Open an SSH **Tab** yourself (or launch installed PuTTY / WinSCP). Optional **port knocking** (TCP/UDP sequence) can run on an Address before connect.
-3. Turn **MCP** on for that tab; once: **Options → Copy MCP config** → paste into VS Code `mcp.json`.
+3. In Host Edit, turn **MCP** on for that Host (off by default); optional host-local Scripts/Notes need their own MCP checkboxes. Once: **Options → Copy MCP config** → paste into VS Code `mcp.json`.
 4. The model uses `session_list` → `session_attach(alias=…)`, then read / subscribe. **Approve** (off by default) is required for write / script run.
 
 Secrets and IPs stay out of MCP payloads. Human and AI share **one PTY per tab**:
@@ -30,7 +30,7 @@ Secrets and IPs stay out of MCP payloads. Human and AI share **one PTY per tab**
 HostsKeeper exposes MCP primarily as an **HTTP** endpoint with a stable **app key** (**Options → Copy MCP config** produces a VS Code HTTP entry using the `X-HostsKeeper-Key` header). That is wider than a typical stdio MCP server glued to one local IDE process:
 
 - The AI client can run on the **same PC** (`127.0.0.1`) or on **another machine** that can reach the vault PC.
-- Credentials and SSH stay on the safe host; the client only sees enabled tabs (and scripts) under your MCP rules.
+- Credentials and SSH stay on the safe host; the client only sees enabled Hosts, their open tabs, and individually enabled Scripts/Notes under your MCP rules.
 
 **Trusted network only.** Intended for LAN or a **VPN / tunnel you operate yourself** (VPN setup is out of scope for this project). Do not expose the MCP port to the open internet without such a tunnel. **stdio** remains available as a same-machine alternative (no URL/key).
 

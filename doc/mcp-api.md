@@ -11,9 +11,9 @@
 - Options → **Copy MCP config** копирует готовую запись для VS Code (`mcp.json`); ключ передаётся заголовком `X-HostsKeeper-Key`, не в URL.
 - Сервер также принимает `?key=<app-key>` и `Authorization: Bearer <app-key>` для совместимости.
 
-- Область: все вкладки с `mcp_enabled=true` + скрипты с включённым MCP в доступном host scope.
+- Область: вкладки всех Host с включённым MCP и их данные; host-local Script/Note доступны только при включённом MCP-флаге ресурса.
 - Выбор вкладки: `session_list` → `session_attach(alias=…)` или `alias`/`session_id` в каждом tool.
-- Человек по-прежнему обязан включить **MCP** на нужных вкладках.
+- Данные Host и разрешённые Script/Note доступны без открытой вкладки. Для session tools и scripts_run нужна открытая вкладка; для write/run также нужен Approve.
 
 Пример VS Code `mcp.json`:
 
@@ -38,18 +38,18 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 ```
 
 - Привязка к одной сессии; **1 клиент на token** → иначе `client_busy`.
-- Область: эта сессия + скрипты с включённым MCP в доступном host scope.
+- Область: одна вкладка и данные её Host; host-local Script/Note требуют также собственного MCP-флага.
 
 ### stdio
 
 - Локальный процесс без token/key.
-- Видит все сессии с `mcp_enabled=true` и скрипты с включённым MCP в доступном host scope.
+- Видит вкладки Host с включённым MCP и их данные; host-local Script/Note требуют также собственного MCP-флага.
 - Идентификация сессии — `alias` / `session_id` / `session_attach`.
 
 ## Общие соглашения
 
 - Секреты и сетевые параметры хостов **не** возвращаются ни в одном tool.
-- Approve (чекбокс на вкладке): **выкл по умолчанию** — MCP только читает терминал; `session_write` / `scripts_run` сразу → `approve_required`. **вкл** — write/run без модалки и без таймаута.
+- Approve (чекбокс на вкладке): **выкл по умолчанию** и доступен только при включённом Host MCP. При выключении Host MCP Approve сбрасывается. **выкл** — MCP только читает терминал; `session_write` / `scripts_run` сразу → `approve_required`. **вкл** — write/run без модалки и без таймаута.
 - При `status=disconnected` операции ввода/чтения потока завершаются ошибкой `disconnected` (кроме информационных, где status явно отдаётся).
 - В `initialize.result` сервер передаёт workflow в `instructions`; `serverInfo.version` соответствует версии пакета.
 - Успешный `tools/call` возвращает объект в `structuredContent` и его JSON-представление в `content`. Ошибки инструментов имеют `isError=true` и содержат прикладной код/сообщение; ошибки JSON-RPC протокола остаются отдельными.
@@ -95,7 +95,7 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 ### host_profile_get / host_profile_set
 
 Свободный текст Host Notes (вкладка Edit Host → **Notes**). Без адресов/учёток/секретов.  
-Доступ только к хостам, для которых есть открытая MCP-вкладка. Approve не требуется.
+Доступ только к Host с включённым Host MCP. Для legacy token scope ограничен Host токена. Открытая вкладка не требуется; Approve не требуется.
 
 Вход get: `{ "session_id"?, "alias"?, "host_id"? }` (иначе — сессия из attach/token).  
 Вход set: то же + `{ "profile": "string" }`.
@@ -220,7 +220,7 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 
 ### scripts_list
 
-Только скрипты с `mcp_enabled=true`. Шаблоны (`host_id=null`) доступны всегда; скрипты хоста — только если у клиента есть открытая MCP-вкладка этого хоста.
+Только скрипты с `mcp_enabled=true`. Шаблоны (`host_id=null`) доступны всегда; host-local скрипты требуют также включённого Host MCP. Открытая вкладка для чтения/редактирования не требуется.
 
 Выход: `id`, `name`, `scope` (`template` или `host`), `host_alias` (alias доступной вкладки хоста или `null`), `description`, `tags`, `parameters` (без `user_value`), `host_id`, `group_id`, `mcp_enabled` (`true`).
 
@@ -232,14 +232,14 @@ http://<safe-host>:<port>/mcp?token=<tab-token>
 
 Выход: полная карточка включая `body`; в `parameters` нет `user_value`.
 При `not_found` обновите `scripts_list`: любой скрипт должен иметь включённый
-чекбокс MCP, а host-скрипт — также открытую MCP-вкладку этого хоста.
+чекбокс MCP, а host-скрипт — также Host MCP.
 Отсутствующий и недоступный скрипты намеренно неразличимы.
 
 ### scripts_compare
 
 Read-only сравнение двух явно выбранных скриптов. Оба ID должны быть доступны в
 scope текущего клиента (у обоих включён MCP; шаблоны доступны всегда;
-host-bound скрипты — при открытой MCP-вкладке соответствующего хоста).
+host-bound скрипты — при включённом MCP соответствующего Host).
 Недоступный и отсутствующий ID неразличимы. Никакие данные vault не меняются.
 
 Вход:
@@ -334,7 +334,7 @@ defaults или переданных значений.
 ### scripts_create / scripts_update
 
 Вход: поля Script + опционально `host_id`, `group_id`.  
-`host_id` при create — только при открытой MCP-вкладке этого хоста.  
+`host_id` при create — только для Host с включённым MCP.
 Скрипты, созданные через MCP, сразу получают `mcp_enabled=true`;
 `scripts_update` не меняет этот флаг. Видимостью управляет UI-чекбокс MCP.
 Update — по `id` или `name` (+ `host_id` при неоднозначности); доступны только скрипты с включённым MCP в текущем scope.
@@ -524,14 +524,14 @@ Approve. Отзыв MCP доступа к исходной сессии блок
 
 ### groups_list / groups_create / groups_update / groups_delete
 
-Дерево групп (`kind=scripts|hosts`). Шаблонные scripts-группы всегда; host-группы — при открытой вкладке хоста.  
+Дерево групп (`kind=scripts|hosts`). Шаблонные scripts-группы всегда; host-local группы — при включённом Host MCP.
 Поле `expanded` (UI) в ответах **не** отдаётся.  
 Create: `name`, `kind?`, `parent_id?`, `host_id?`. Update/delete по `id`. Без approve.  
 `groups_delete` — **рекурсивно** удаляет подгруппы и всё содержимое (hosts/scripts/notes).
 
 ### notes_list / notes_get / notes_create / notes_update / notes_delete
 
-Только заметки с `mcp_enabled=true`. Видимость host-local — как у scripts (нужна MCP-вкладка хоста).  
+Только заметки с `mcp_enabled=true`. Host-local заметки дополнительно требуют включённого Host MCP; открытая вкладка не нужна.
 Create всегда ставит `mcp_enabled=true` (параметра нет). Update **не** меняет `mcp_enabled`. Без Approve.  
 Поля: `name`, `body` (Markdown), `group_id?`, `host_id?`.
 
@@ -541,7 +541,7 @@ Create всегда ставит `mcp_enabled=true` (параметра нет).
 |------|--------|
 | `unauthorized` | Нет/неверный app key или tab token (HTTP) |
 | `client_busy` | Слот клиента на legacy token занят |
-| `not_found` | Нет сессии/скрипта/run в scope. Для скрипта обновите `scripts_list`; host-скрипт требует открытую MCP-вкладку своего хоста |
+| `not_found` | Нет сессии/скрипта/run в scope. Для скрипта обновите `scripts_list`; host-скрипт требует Host MCP и собственный MCP-флаг |
 | `disconnected` | SSH/PTY не live |
 | `approve_required` | Approve выкл — write/run запрещены |
 | `invalid_args` | Валидация входа; при сохранении скрипта — некорректный placeholder или объявления параметров |
