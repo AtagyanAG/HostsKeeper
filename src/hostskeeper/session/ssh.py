@@ -6,6 +6,7 @@ import io
 import socket
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 
 import paramiko
@@ -37,13 +38,16 @@ class SshShell:
         self._reader: threading.Thread | None = None
         self._stop = threading.Event()
         self._dead = threading.Event()
+        self._lock = threading.RLock()
+        self._exec_channels: weakref.WeakSet[paramiko.Channel] = weakref.WeakSet()
 
     @property
     def alive(self) -> bool:
-        if self._dead.is_set():
-            return False
-        channel = self._channel
-        return channel is not None and not channel.closed
+        with self._lock:
+            if self._dead.is_set():
+                return False
+            channel = self._channel
+            return channel is not None and not channel.closed
 
     def connect(self) -> None:
         client = paramiko.SSHClient()
@@ -80,40 +84,79 @@ class SshShell:
             raise
         channel = client.invoke_shell(term="xterm", width=120, height=40)
         channel.settimeout(0.0)
-        self._client = client
-        self._channel = channel
-        self._stop.clear()
-        self._dead.clear()
+        with self._lock:
+            self._client = client
+            self._channel = channel
+            self._stop.clear()
+            self._dead.clear()
         self._reader = threading.Thread(
             target=self._read_loop, name="hostskeeper-ssh-reader", daemon=True
         )
         self._reader.start()
 
     def write(self, text: str) -> None:
-        if not self.alive or self._channel is None:
-            raise RuntimeError("ssh shell is not alive")
-        self._channel.sendall(text.encode("utf-8", errors="replace"))
+        with self._lock:
+            if not self.alive or self._channel is None:
+                raise RuntimeError("ssh shell is not alive")
+            self._channel.sendall(text.encode("utf-8", errors="replace"))
 
     def resize(self, cols: int, rows: int) -> None:
-        if not self.alive or self._channel is None:
-            return
-        cols = max(20, min(int(cols), 500))
-        rows = max(5, min(int(rows), 200))
-        self._channel.resize_pty(width=cols, height=rows)
+        with self._lock:
+            if not self.alive or self._channel is None:
+                return
+            cols = max(20, min(int(cols), 500))
+            rows = max(5, min(int(rows), 200))
+            self._channel.resize_pty(width=cols, height=rows)
+
+    def open_exec_channel(self, command: str) -> paramiko.Channel:
+        """Start a non-PTY command over this tab's authenticated transport."""
+        with self._lock:
+            client = self._client
+            if not self.alive or client is None:
+                raise RuntimeError("ssh shell is not alive")
+            transport = client.get_transport()
+            if transport is None or not transport.is_active():
+                raise RuntimeError("ssh transport is not active")
+
+            timeout = max(1.0, float(self._params.connect_timeout_sec))
+            channel = transport.open_session(timeout=timeout)
+            self._exec_channels.add(channel)
+            request_timer = threading.Timer(
+                timeout, _close_exec_channel_safely, args=(channel,)
+            )
+            request_timer.daemon = True
+            try:
+                channel.settimeout(timeout)
+                request_timer.start()
+                channel.exec_command(command)
+                request_timer.cancel()
+                channel.shutdown_write()
+                channel.settimeout(0.0)
+                return channel
+            except Exception:
+                request_timer.cancel()
+                self._exec_channels.discard(channel)
+                _close_exec_channel_safely(channel)
+                raise
 
     def close(self) -> None:
-        self._stop.set()
-        channel = self._channel
-        client = self._client
-        self._channel = None
-        self._client = None
+        with self._lock:
+            self._stop.set()
+            self._dead.set()
+            channel = self._channel
+            client = self._client
+            exec_channels = list(self._exec_channels)
+            self._exec_channels.clear()
+            self._channel = None
+            self._client = None
         try:
+            for exec_channel in exec_channels:
+                _close_exec_channel_safely(exec_channel)
             if channel is not None:
-                channel.close()
+                _close_exec_channel_safely(channel)
         finally:
             if client is not None:
                 client.close()
-        self._dead.set()
         reader = self._reader
         if reader is not None and reader.is_alive():
             reader.join(timeout=2.0)
@@ -162,3 +205,10 @@ class SshShell:
                     time.sleep(0.05)
         finally:
             self._dead.set()
+
+
+def _close_exec_channel_safely(channel: paramiko.Channel) -> None:
+    try:
+        channel.close()
+    except (OSError, paramiko.SSHException, RuntimeError):
+        pass

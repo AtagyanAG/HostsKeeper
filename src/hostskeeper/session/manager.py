@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
@@ -17,12 +18,21 @@ from hostskeeper.session.models import (
     new_session_id,
 )
 from hostskeeper.session.knock import KnockStep, perform_knock
+from hostskeeper.session.script_run_manager import (
+    ScriptRunCapacityError,
+    ScriptRunManager,
+    ScriptRunNotFoundError,
+    ScriptRunSnapshot,
+)
+from hostskeeper.session.script_runs import ScriptRunInfo, ScriptRunOrigin
 from hostskeeper.session.ssh import SshConnectParams, SshShell
 from hostskeeper.vault.models import (
     AUTH_KEY_PAIR,
     AUTH_OPENSSH_CONFIG,
     AUTH_PASSWORD,
 )
+from hostskeeper.vault.errors import NotFoundError
+from hostskeeper.vault.script_render import render_script
 from hostskeeper.vault.store import Vault
 
 
@@ -40,6 +50,14 @@ class SessionNotFoundError(SessionError):
 
 class SessionStateError(SessionError):
     pass
+
+
+class ScriptRunStartError(SessionError):
+    """Safe, stable reason a saved MCP script run could not be started."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 class McpClientBusyError(SessionError):
@@ -74,6 +92,7 @@ class SessionManager:
         self._sessions: dict[UUID, _SessionState] = {}
         self._alias_counts: dict[str, int] = {}
         self._connect_timeout_sec = max(1.0, float(connect_timeout_sec))
+        self._script_runs = ScriptRunManager()
 
     def set_connect_timeout_sec(self, timeout_sec: float) -> None:
         self._connect_timeout_sec = max(1.0, float(timeout_sec))
@@ -173,6 +192,140 @@ class SessionManager:
                 raise SessionStateError("session is not live")
             state.shell.write(payload)
 
+    def find_script_run_by_request(
+        self, session_id: UUID, request_id: UUID
+    ) -> ScriptRunInfo | None:
+        with self._lock:
+            state = self._require(session_id)
+            if (
+                state.info.target != SessionTarget.TAB
+                or not state.info.mcp_enabled
+            ):
+                raise ScriptRunStartError("not_found")
+            return self._script_runs.find_by_request(session_id, request_id)
+
+    def start_script_run(
+        self,
+        session_id: UUID,
+        script_id: UUID,
+        request_id: UUID,
+        *,
+        params: Mapping[str, str] | None,
+        origin: ScriptRunOrigin,
+    ) -> ScriptRunInfo:
+        """Start a visible saved script without using or modifying the PTY."""
+        with self._lock:
+            state = self._require(session_id)
+            if (
+                state.info.target != SessionTarget.TAB
+                or not state.info.mcp_enabled
+            ):
+                raise ScriptRunStartError("not_found")
+
+            existing = self._script_runs.find_by_request(session_id, request_id)
+            if existing is not None:
+                return existing
+
+            self._refresh_status(state)
+            if state.info.status != SessionStatus.LIVE or state.shell is None:
+                raise ScriptRunStartError("disconnected")
+            if not state.info.approve_enabled:
+                raise ScriptRunStartError("approve_required")
+
+            try:
+                script = self._vault.get_script(script_id)
+            except NotFoundError as exc:
+                raise ScriptRunStartError("not_found") from exc
+            if not script.mcp_enabled or (
+                script.host_id is not None and script.host_id != state.info.host_id
+            ):
+                raise ScriptRunStartError("not_found")
+
+            command = render_script(script, params)
+            shell = state.shell
+            try:
+                return self._script_runs.start(
+                    session_id=session_id,
+                    script_id=script_id,
+                    request_id=request_id,
+                    origin=origin,
+                    command=command,
+                    open_channel=shell.open_exec_channel,
+                    session_alive=lambda: shell.alive,
+                )
+            except ScriptRunCapacityError as exc:
+                raise ScriptRunStartError("run_capacity") from exc
+
+    def get_script_run(self, session_id: UUID, run_id: UUID) -> ScriptRunInfo:
+        with self._lock:
+            state = self._require(session_id)
+            if (
+                state.info.target != SessionTarget.TAB
+                or not state.info.mcp_enabled
+            ):
+                raise ScriptRunNotFoundError
+            return self._script_runs.get(session_id, run_id)
+
+    def read_script_run_output(
+        self,
+        session_id: UUID,
+        run_id: UUID,
+        *,
+        stdout_cursor: str | None = None,
+        stderr_cursor: str | None = None,
+        max_chars: int = 16_384,
+    ) -> ScriptRunSnapshot:
+        with self._lock:
+            state = self._require(session_id)
+            if (
+                state.info.target != SessionTarget.TAB
+                or not state.info.mcp_enabled
+            ):
+                raise ScriptRunNotFoundError
+            return self._script_runs.read_output(
+                session_id,
+                run_id,
+                stdout_cursor=stdout_cursor,
+                stderr_cursor=stderr_cursor,
+                max_chars=max_chars,
+            )
+
+    def wait_script_run(
+        self,
+        session_id: UUID,
+        run_id: UUID,
+        *,
+        timeout_sec: float = 30.0,
+        stdout_cursor: str | None = None,
+        stderr_cursor: str | None = None,
+        max_chars: int = 16_384,
+    ) -> ScriptRunSnapshot:
+        with self._lock:
+            state = self._require(session_id)
+            if (
+                state.info.target != SessionTarget.TAB
+                or not state.info.mcp_enabled
+            ):
+                raise ScriptRunNotFoundError
+        return self._script_runs.wait(
+            session_id,
+            run_id,
+            timeout_sec=timeout_sec,
+            stdout_cursor=stdout_cursor,
+            stderr_cursor=stderr_cursor,
+            max_chars=max_chars,
+        )
+
+    def cancel_script_run(self, session_id: UUID, run_id: UUID) -> ScriptRunInfo:
+        with self._lock:
+            state = self._require(session_id)
+            if (
+                state.info.target != SessionTarget.TAB
+                or not state.info.mcp_enabled
+            ):
+                raise ScriptRunNotFoundError
+        return self._script_runs.cancel(session_id, run_id)
+
     def resize(self, session_id: UUID, cols: int, rows: int) -> None:
         with self._lock:
             state = self._require(session_id)
@@ -184,6 +337,7 @@ class SessionManager:
     def disconnect(self, session_id: UUID) -> SessionInfo:
         with self._lock:
             state = self._require(session_id)
+            self._script_runs.on_session_lost(session_id)
             if state.shell is not None:
                 state.shell.close()
                 state.shell = None
@@ -195,6 +349,7 @@ class SessionManager:
             state = self._require(session_id)
             if state.info.status == SessionStatus.CLOSED:
                 raise SessionStateError("session is closed")
+            self._script_runs.on_session_lost(session_id)
             if state.shell is not None:
                 state.shell.close()
                 state.shell = None
@@ -207,6 +362,7 @@ class SessionManager:
             state = self._sessions.get(session_id)
             if state is None:
                 return
+            self._script_runs.on_session_lost(session_id)
             if state.shell is not None:
                 state.shell.close()
                 state.shell = None
@@ -231,6 +387,7 @@ class SessionManager:
     def disable_mcp(self, session_id: UUID) -> SessionInfo:
         with self._lock:
             state = self._require(session_id)
+            self._script_runs.on_execution_access_revoked(session_id)
             state.mcp_token = None
             state.mcp_client_id = None
             state.info = self._copy_info(state.info, mcp_enabled=False)
@@ -254,6 +411,8 @@ class SessionManager:
         with self._lock:
             state = self._require(session_id)
             state.info = self._copy_info(state.info, approve_enabled=enabled)
+            if not enabled:
+                self._script_runs.on_execution_access_revoked(session_id)
             return state.info
 
     def update_screen_snapshot(
@@ -391,6 +550,7 @@ class SessionManager:
             return
         if state.info.status == SessionStatus.LIVE:
             if state.shell is None or not state.shell.alive:
+                self._script_runs.on_session_lost(state.info.id)
                 if state.shell is not None:
                     state.shell.close()
                     state.shell = None

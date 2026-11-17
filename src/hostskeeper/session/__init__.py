@@ -8,6 +8,7 @@ from hostskeeper.session.manager import (
     SessionManager,
     SessionNotFoundError,
     SessionStateError,
+    ScriptRunStartError,
 )
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
 from hostskeeper.session.script_runs import (
@@ -18,6 +19,7 @@ from hostskeeper.session.script_runs import (
     ScriptRunOutputInfo,
     ScriptRunState,
 )
+from hostskeeper.session.script_run_manager import ScriptRunSnapshot
 
 __all__ = [
     "BufferRead",
@@ -29,6 +31,8 @@ __all__ = [
     "SessionManager",
     "SessionNotFoundError",
     "SessionStateError",
+    "ScriptRunSnapshot",
+    "ScriptRunStartError",
     "SessionStatus",
     "SessionTarget",
     "SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM",

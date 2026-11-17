@@ -17,10 +17,13 @@ from hostskeeper.session.manager import (
     McpUnauthorizedError,
     SessionManager,
     SessionStateError,
+    ScriptRunStartError,
 )
 from hostskeeper.session.models import SessionInfo, SessionStatus
+from hostskeeper.session.script_runs import ScriptRunInfo, ScriptRunOrigin
 from hostskeeper.vault.errors import NotFoundError, ValidationError
 from hostskeeper.vault.models import Group, Host, Note, Script, ScriptParameter
+from hostskeeper.vault.script_render import ScriptRenderError
 from hostskeeper.vault.store import Vault
 
 
@@ -736,6 +739,64 @@ class McpToolService:
             alias=alias,
             submit=submit,
         )
+
+    def _start_script_run(
+        self,
+        access: McpAccess,
+        *,
+        request_id: str,
+        script_id: str | None = None,
+        name: str | None = None,
+        host_id: str | None = None,
+        params: dict[str, str] | None = None,
+        session_id: str | None = None,
+        alias: str | None = None,
+    ) -> ScriptRunInfo:
+        """Internal isolated-run path; not registered as an MCP tool yet."""
+        try:
+            request_uuid = UUID(request_id)
+        except ValueError as exc:
+            raise McpToolError("invalid_args", "invalid request_id") from exc
+
+        info = self._resolve_session(
+            access, session_id=session_id, alias=alias
+        )
+        try:
+            existing = self._sessions.find_script_run_by_request(
+                info.id, request_uuid
+            )
+        except ScriptRunStartError as exc:
+            raise McpToolError(exc.code) from exc
+        if existing is not None:
+            return existing
+
+        script = self._find_script(
+            access, id=script_id, name=name, host_id=host_id
+        )
+        if script.host_id is not None and info.host_id != script.host_id:
+            raise McpToolError(
+                "client_scope",
+                "host script can only run in a session of that host",
+            )
+        origin = (
+            ScriptRunOrigin.STDIO
+            if access.mode == "stdio"
+            else ScriptRunOrigin.HTTP_GATEWAY
+            if access.gateway
+            else ScriptRunOrigin.HTTP_LEGACY
+        )
+        try:
+            return self._sessions.start_script_run(
+                info.id,
+                script.id,
+                request_uuid,
+                params=params,
+                origin=origin,
+            )
+        except ScriptRenderError as exc:
+            raise McpToolError(exc.code, str(exc)) from exc
+        except ScriptRunStartError as exc:
+            raise McpToolError(exc.code) from exc
 
     def groups_list(
         self,
