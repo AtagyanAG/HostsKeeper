@@ -8,7 +8,11 @@ import pytest
 
 from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.service import McpAccess, McpToolService
-from hostskeeper.session.manager import SessionManager, _SessionState
+from hostskeeper.session.manager import (
+    SessionManager,
+    SessionStateError,
+    _SessionState,
+)
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
 from hostskeeper.session.script_runs import ScriptRunState
 from hostskeeper.vault import Host, Script, ScriptParameter, Vault
@@ -130,7 +134,65 @@ def test_internal_start_uses_saved_script_and_isolated_channel(stack) -> None:
     assert completed.state == ScriptRunState.SUCCEEDED
     assert shell.commands == ["printf 'ok'"]
     assert shell.writes == []
-    assert sessions.read(info.id).data == ""
+    transcript = sessions.read(info.id).data
+    assert f"Run script: {script.name} [{started.run_id}]" in transcript
+    assert "initiator: MCP client" in transcript
+    assert shell.commands[0] not in transcript
+
+
+def test_user_start_is_explicit_and_uses_same_transcript_without_mcp_gates(
+    stack,
+) -> None:
+    vault, sessions, _, _, script, info, shell = stack
+    script.mcp_enabled = False
+    vault.update_script(script)
+    sessions.disable_mcp(info.id)
+    sessions.set_approve(info.id, enabled=False)
+
+    started = sessions.start_user_script_run(info.id, script.id)
+    completed = sessions._script_runs.wait(info.id, started.run_id, timeout_sec=1).info
+    transcript = sessions.read(info.id).data
+
+    assert completed.state == ScriptRunState.SUCCEEDED
+    assert shell.commands == ["printf 'default'"]
+    assert shell.writes == []
+    assert f"Run script: {script.name} [{started.run_id}]" in transcript
+    assert "initiator: human" in transcript
+    assert f"finished: succeeded; exit_code=0" in transcript
+    assert shell.commands[0] not in transcript
+
+
+def test_user_start_still_enforces_host_scope(stack) -> None:
+    vault, sessions, _, _, _, info, shell = stack
+    other_host = vault.add_host(Host(name="other-host"))
+    script = vault.add_script(
+        Script(name="other-host-script", body="true", host_id=other_host.id)
+    )
+
+    with pytest.raises(SessionStateError, match="another host"):
+        sessions.start_user_script_run(info.id, script.id)
+
+    assert shell.commands == []
+
+
+def test_mcp_lifecycle_cannot_cancel_ui_run_but_can_read_its_transcript(stack) -> None:
+    _, sessions, service, _, script, info, shell = stack
+    shell.channel.exit_status_ready = lambda: False
+    started = sessions.start_user_script_run(info.id, script.id)
+
+    with pytest.raises(McpToolError) as hidden:
+        service.scripts_run_cancel(
+            McpAccess(mode="stdio"),
+            run_id=str(started.run_id),
+            alias=info.alias,
+        )
+
+    assert hidden.value.code == "not_found"
+    assert shell.channel.closed is False
+    assert f"Run script: {script.name} [{started.run_id}]" in sessions.read(
+        info.id
+    ).data
+    sessions._script_runs.cancel(info.id, started.run_id)
 
 
 def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> None:
@@ -138,7 +200,7 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     access = McpAccess(mode="stdio")
     request_id = str(uuid4())
     rendered = "printf 'ok'"
-    shell.channel.stdout.extend(rendered.encode("utf-8"))
+    shell.channel.stdout.extend(b"output line\r\n")
 
     accepted = service.scripts_run(
         access,
@@ -170,11 +232,11 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     assert result["state"] == "succeeded"
     assert result["exit_code"] == 0
     assert result["stdout"] == {
-        "cursor": str(len(rendered)),
-        "data": rendered,
+        "cursor": str(len("output line\r\n")),
+        "data": "output line\r\n",
         "truncated": False,
     }
-    assert result["stdout"]["data"].count(rendered) == 1
+    assert result["stdout"]["data"].count("output line") == 1
     assert result["stderr"]["data"] == ""
     assert result["wait_timed_out"] is False
     status = service.scripts_run_status(
@@ -185,7 +247,11 @@ def test_public_run_lifecycle_returns_acceptance_and_bounded_output(stack) -> No
     assert status["state"] == "succeeded"
     assert rendered not in str(status)
     assert shell.writes == []
-    assert sessions.read(info.id).data == ""
+    transcript = sessions.read(info.id).data
+    assert f"Run script: {script.name} [{accepted['run_id']}]" in transcript
+    assert "output line\r\n" in transcript
+    assert f"finished: succeeded; exit_code=0" in transcript
+    assert rendered not in transcript
 
 
 def test_run_wait_validates_timeout_and_inspection_is_scoped(stack) -> None:

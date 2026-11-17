@@ -8,7 +8,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from hostskeeper.session.buffer import BufferRead, OutputBuffer
 from hostskeeper.session.models import (
@@ -202,7 +202,10 @@ class SessionManager:
                 or not state.info.mcp_enabled
             ):
                 raise ScriptRunStartError("not_found")
-            return self._script_runs.find_by_request(session_id, request_id)
+            run = self._script_runs.find_by_request(session_id, request_id)
+            if run is not None and run.origin == ScriptRunOrigin.USER_INTERFACE:
+                return None
+            return run
 
     def start_script_run(
         self,
@@ -224,6 +227,8 @@ class SessionManager:
 
             existing = self._script_runs.find_by_request(session_id, request_id)
             if existing is not None:
+                if existing.origin == ScriptRunOrigin.USER_INTERFACE:
+                    raise ScriptRunStartError("not_found")
                 return existing
 
             self._refresh_status(state)
@@ -252,9 +257,45 @@ class SessionManager:
                     command=command,
                     open_channel=shell.open_exec_channel,
                     session_alive=lambda: shell.alive,
+                    display_name=script.name,
+                    display_buffer=state.buffer,
                 )
             except ScriptRunCapacityError as exc:
                 raise ScriptRunStartError("run_capacity") from exc
+
+    def start_user_script_run(
+        self, session_id: UUID, script_id: UUID
+    ) -> ScriptRunInfo:
+        """Run a saved script from an explicit UI action and mirror its transcript."""
+        with self._lock:
+            state = self._require(session_id)
+            if state.info.target != SessionTarget.TAB:
+                raise SessionStateError("script execution requires a session tab")
+            self._refresh_status(state)
+            if state.info.status != SessionStatus.LIVE or state.shell is None:
+                raise SessionStateError("session is not live")
+            try:
+                script = self._vault.get_script(script_id)
+            except NotFoundError as exc:
+                raise SessionStateError("script no longer exists") from exc
+            if script.host_id is not None and script.host_id != state.info.host_id:
+                raise SessionStateError("script belongs to another host")
+            command = render_script(script, None)
+            shell = state.shell
+            try:
+                return self._script_runs.start(
+                    session_id=session_id,
+                    script_id=script.id,
+                    request_id=uuid4(),
+                    origin=ScriptRunOrigin.USER_INTERFACE,
+                    command=command,
+                    open_channel=shell.open_exec_channel,
+                    session_alive=lambda: shell.alive,
+                    display_name=script.name,
+                    display_buffer=state.buffer,
+                )
+            except ScriptRunCapacityError as exc:
+                raise SessionStateError("script run capacity reached") from exc
 
     def get_script_run(self, session_id: UUID, run_id: UUID) -> ScriptRunInfo:
         with self._lock:
@@ -264,7 +305,7 @@ class SessionManager:
                 or not state.info.mcp_enabled
             ):
                 raise ScriptRunNotFoundError
-            return self._script_runs.get(session_id, run_id)
+            return self._require_mcp_script_run(session_id, run_id)
 
     def read_script_run_output(
         self,
@@ -282,6 +323,7 @@ class SessionManager:
                 or not state.info.mcp_enabled
             ):
                 raise ScriptRunNotFoundError
+            self._require_mcp_script_run(session_id, run_id)
             return self._script_runs.read_output(
                 session_id,
                 run_id,
@@ -307,6 +349,7 @@ class SessionManager:
                 or not state.info.mcp_enabled
             ):
                 raise ScriptRunNotFoundError
+            self._require_mcp_script_run(session_id, run_id)
         return self._script_runs.wait(
             session_id,
             run_id,
@@ -324,7 +367,16 @@ class SessionManager:
                 or not state.info.mcp_enabled
             ):
                 raise ScriptRunNotFoundError
+            self._require_mcp_script_run(session_id, run_id)
         return self._script_runs.cancel(session_id, run_id)
+
+    def _require_mcp_script_run(
+        self, session_id: UUID, run_id: UUID
+    ) -> ScriptRunInfo:
+        info = self._script_runs.get(session_id, run_id)
+        if info.origin == ScriptRunOrigin.USER_INTERFACE:
+            raise ScriptRunNotFoundError
+        return info
 
     def resize(self, session_id: UUID, cols: int, rows: int) -> None:
         with self._lock:

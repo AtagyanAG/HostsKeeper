@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 import paramiko
 
-from hostskeeper.session.buffer import BufferRead
+from hostskeeper.session.buffer import BufferRead, OutputBuffer
 from hostskeeper.session.script_runs import (
     SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM,
     ScriptRunErrorCode,
@@ -78,9 +78,9 @@ class _BoundedOutputBuffer:
         self._size = 0
         self._truncated = False
 
-    def append(self, text: str) -> None:
+    def append(self, text: str) -> str:
         if not text:
-            return
+            return ""
         with self._lock:
             remaining = SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM - self._size
             kept = text[:remaining]
@@ -89,6 +89,7 @@ class _BoundedOutputBuffer:
                 self._size += len(kept)
             if len(kept) != len(text):
                 self._truncated = True
+            return kept
 
     def read_since(self, cursor: str | None, max_chars: int) -> BufferRead:
         start = self._parse_cursor(cursor)
@@ -129,8 +130,11 @@ class _BoundedOutputBuffer:
 @dataclass
 class _ScriptRunRecord:
     info: ScriptRunInfo
+    display_name: str
+    display_buffer: OutputBuffer | None
     stdout: _BoundedOutputBuffer = field(default_factory=_BoundedOutputBuffer)
     stderr: _BoundedOutputBuffer = field(default_factory=_BoundedOutputBuffer)
+    display_output_truncation_notified: bool = False
     channel: paramiko.Channel | None = None
     session_alive: Callable[[], bool] = lambda: False
     deadline: float | None = None
@@ -179,6 +183,8 @@ class ScriptRunManager:
         command: str,
         open_channel: Callable[[str], paramiko.Channel],
         session_alive: Callable[[], bool],
+        display_name: str = "script",
+        display_buffer: OutputBuffer | None = None,
     ) -> ScriptRunInfo:
         key = (session_id, request_id)
         with self._condition:
@@ -204,10 +210,27 @@ class ScriptRunManager:
                 accepted_at=now,
                 updated_at=now,
             )
-            record = _ScriptRunRecord(info=info, session_alive=session_alive)
+            record = _ScriptRunRecord(
+                info=info,
+                display_name=_safe_display_name(display_name),
+                display_buffer=display_buffer,
+                session_alive=session_alive,
+            )
             self._records[info.run_id] = record
             self._request_index[key] = info.run_id
             self._changed(record)
+
+        if record.display_buffer is not None:
+            initiator = (
+                "human"
+                if record.info.origin == ScriptRunOrigin.USER_INTERFACE
+                else "MCP client"
+            )
+            record.display_buffer.append(
+                "\r\n"
+                f"[HostsKeeper] Run script: {record.display_name} "
+                f"[{record.info.run_id}] - starting (initiator: {initiator})\r\n"
+            )
 
         try:
             channel = open_channel(command)
@@ -435,10 +458,12 @@ class ScriptRunManager:
             if not data:
                 break
             stdout_bytes += len(data)
-            record.stdout.append(
-                _sanitize_output(record.stdout_decoder.decode(data, final=False))
+            stream_changed = self._append_stream_output(
+                record,
+                record.stdout,
+                record.stdout_decoder.decode(data, final=False),
             )
-            changed = True
+            changed = changed or stream_changed
         stderr_bytes = 0
         while (
             channel.recv_stderr_ready()
@@ -450,10 +475,12 @@ class ScriptRunManager:
             if not data:
                 break
             stderr_bytes += len(data)
-            record.stderr.append(
-                _sanitize_output(record.stderr_decoder.decode(data, final=False))
+            stream_changed = self._append_stream_output(
+                record,
+                record.stderr,
+                record.stderr_decoder.decode(data, final=False),
             )
-            changed = True
+            changed = changed or stream_changed
         if changed:
             with self._condition:
                 if record.info.state in _ACTIVE_STATES:
@@ -462,13 +489,43 @@ class ScriptRunManager:
     def _flush_decoders(self, record: _ScriptRunRecord) -> None:
         stdout_tail = _sanitize_output(record.stdout_decoder.decode(b"", final=True))
         stderr_tail = _sanitize_output(record.stderr_decoder.decode(b"", final=True))
-        if stdout_tail:
-            record.stdout.append(stdout_tail)
-        if stderr_tail:
-            record.stderr.append(stderr_tail)
-        if stdout_tail or stderr_tail:
+        stdout_changed = self._append_stream_output(
+            record, record.stdout, stdout_tail
+        )
+        stderr_changed = self._append_stream_output(
+            record, record.stderr, stderr_tail
+        )
+        if stdout_changed or stderr_changed:
             with self._condition:
                 self._update_output(record)
+
+    def _append_stream_output(
+        self,
+        record: _ScriptRunRecord,
+        output: _BoundedOutputBuffer,
+        text: str,
+    ) -> bool:
+        safe_text = _sanitize_output(text)
+        if not safe_text:
+            return False
+        with self._condition:
+            if record.info.state not in _ACTIVE_STATES:
+                return False
+            was_truncated = output.truncated
+            retained = output.append(safe_text)
+            if record.display_buffer is not None and retained:
+                record.display_buffer.append(retained)
+            if (
+                record.display_buffer is not None
+                and output.truncated
+                and not was_truncated
+                and not record.display_output_truncation_notified
+            ):
+                record.display_buffer.append(
+                    "\r\n[HostsKeeper] Run output truncated at capture limit.\r\n"
+                )
+                record.display_output_truncation_notified = True
+            return True
 
     def _finish_with_exit_code(
         self, record: _ScriptRunRecord, exit_code: int
@@ -491,6 +548,7 @@ class ScriptRunManager:
             )
             record.channel = None
             self._changed(record)
+            self._append_terminal_event(record)
         if channel is not None:
             _close_channel(channel)
 
@@ -525,6 +583,23 @@ class ScriptRunManager:
         )
         record.channel = None
         self._changed(record)
+        self._append_terminal_event(record)
+
+    @staticmethod
+    def _append_terminal_event(record: _ScriptRunRecord) -> None:
+        if record.display_buffer is None:
+            return
+        state = record.info.state.value
+        if record.info.exit_code is not None:
+            detail = f"exit_code={record.info.exit_code}"
+        elif record.info.process_may_continue:
+            detail = "exit_code=unknown; process_may_continue=true"
+        else:
+            detail = "exit_code=unknown"
+        record.display_buffer.append(
+            f"\r\n[HostsKeeper] Run [{record.info.run_id}] finished: "
+            f"{state}; {detail}\r\n"
+        )
 
     def _update_output(self, record: _ScriptRunRecord) -> None:
         now = max(_utcnow(), record.info.updated_at)
@@ -640,6 +715,20 @@ def _sanitize_output(text: str) -> str:
         else "\uFFFD"
         for char in text
     )
+
+
+def _safe_display_name(name: str) -> str:
+    safe = "".join(
+        " "
+        if char in "\r\n"
+        else "\uFFFD"
+        if unicodedata.category(char).startswith("C")
+        else " "
+        if unicodedata.category(char) in {"Zl", "Zp"}
+        else char
+        for char in name
+    )
+    return safe[:120] or "script"
 
 
 def _utcnow() -> datetime:

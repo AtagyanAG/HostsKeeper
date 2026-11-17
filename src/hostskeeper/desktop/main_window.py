@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
         self._session_tabs: dict[UUID, SessionTab] = {}
         self._welcome_index: int | None = 0
         self._open_thread: QThread | None = None
-        self._pending_script_write: str | None = None
+        self._pending_script_run: UUID | None = None
         self._open_worker: object | None = None
         self._shutting_down = False
         self._connect_busy = False
@@ -1656,7 +1656,9 @@ class MainWindow(QMainWindow):
         except McpToolError as exc:
             QMessageBox.warning(self, "Run script", str(exc))
             return
-        self._run_script_target(host.id, addr_id, cred_id, rendered, dlg.mode)
+        self._run_script_target(
+            host.id, addr_id, cred_id, rendered, dlg.mode, script.id
+        )
 
     def _pick_host_for_script_run(self):
         """Ask which host to run a template script on. Returns Host or None."""
@@ -1756,11 +1758,11 @@ class MainWindow(QMainWindow):
         if self._shutting_down:
             return
         self._attach_session_tab(info.id, info.alias)
-        pending = self._pending_script_write
-        self._pending_script_write = None
+        pending = self._pending_script_run
+        self._pending_script_run = None
         if pending and self._state.sessions is not None:
             try:
-                self._state.sessions.write(info.id, pending, submit=True)
+                self._state.sessions.start_user_script_run(info.id, pending)
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.warning(self, "Run script", str(exc))
         self._status.showMessage(f"Session {info.alias} · {info.status.value}")
@@ -1769,7 +1771,7 @@ class MainWindow(QMainWindow):
     def _on_open_tab_fail(self, message: str) -> None:
         if self._shutting_down:
             return
-        self._pending_script_write = None
+        self._pending_script_run = None
         QMessageBox.critical(self, "Open Tab failed", message)
         self._status.showMessage("Connect failed")
 
@@ -1863,9 +1865,10 @@ class MainWindow(QMainWindow):
         credential_id: UUID,
         rendered: str,
         mode: str,
+        script_id: UUID,
     ) -> None:
         if mode == "new_tab":
-            self._pending_script_write = rendered
+            self._pending_script_run = script_id
             self._open_tab_for(host_id, address_id, credential_id)
             return
         if mode == "putty":
@@ -1885,7 +1888,7 @@ class MainWindow(QMainWindow):
         if self._state.sessions is None:
             return
         try:
-            self._state.sessions.write(session_id, rendered, submit=True)
+            self._state.sessions.start_user_script_run(session_id, script_id)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "Run script", str(exc))
 

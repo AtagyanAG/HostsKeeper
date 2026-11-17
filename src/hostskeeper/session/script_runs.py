@@ -16,6 +16,7 @@ def _utcnow() -> datetime:
 
 
 class ScriptRunOrigin(str, Enum):
+    USER_INTERFACE = "user_interface"
     STDIO = "stdio"
     HTTP_GATEWAY = "http_gateway"
     HTTP_LEGACY = "http_legacy"

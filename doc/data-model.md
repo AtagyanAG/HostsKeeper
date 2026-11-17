@@ -170,21 +170,24 @@ MCP `notes_*` видит только `mcp_enabled=true` (шаблоны + host-
 
 ### ScriptRun (runtime; не сохраняется в vault)
 
-Runtime-запись состояния MCP-запуска хранится в памяти процесса. Executor
-запускает сохранённый скрипт через отдельный SSH exec-channel; MCP-инструменты
+Runtime-запись запуска сохранённого скрипта хранится в памяти процесса.
+Исполнитель использует отдельный SSH exec-channel; при MCP-запуске инструменты
 `scripts_run_status` и `scripts_run_wait` возвращают состояние и отдельные
-ограниченные потоки результата. Запись привязана к исходной сессии и скрипту;
-origin фиксирует только тип MCP-доступа, не token или app key. Доступ к записи
-проверяется повторным разрешением `session_id` в текущем клиентском scope.
-Команда не хранится в run record и не дописывается к stdout/stderr; фактический
-вывод не фильтруется, даже если его строки совпадают с фрагментом команды.
+ограниченные потоки результата. Начало, фактический stdout/stderr и конечный
+статус также зеркалируются в общий буфер сессии, который читают UI и
+`session_read`. Origin отмечает `user_interface` или тип MCP-доступа; он не
+содержит token или app key. Доступ к MCP-записи проверяется повторным
+разрешением `session_id` в текущем клиентском scope; MCP lifecycle скрывает
+записи с origin `user_interface`. Команда не хранится в run record и не
+дописывается к stdout/stderr или общему буферу; фактический вывод не
+фильтруется, даже если его строки совпадают с фрагментом команды.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | run_id | UUID | Идентификатор запуска |
-| request_id | UUID | Идемпотентный ключ от MCP-клиента, уникальный для намерения в пределах сессии |
+| request_id | UUID | Ключ идемпотентности MCP-клиента; для UI-запуска генерируется внутри процесса |
 | session_id / script_id | UUID | Исходные объекты |
-| origin | enum | `stdio` \| `http_gateway` \| `http_legacy`; не является credential |
+| origin | enum | `user_interface` \| `stdio` \| `http_gateway` \| `http_legacy`; не является credential |
 | state | enum | `accepted` \| `starting` \| `running` \| `cancel_requested` \| `succeeded` \| `failed` \| `cancelled` \| `session_lost` \| `execution_timed_out` \| `unknown` \| `not_supported` |
 | accepted_at / started_at / updated_at | datetime | UTC-время принятия, начала и последнего изменения |
 | completed_at | datetime? | Только если завершение процесса подтверждено |

@@ -86,8 +86,8 @@ def _timestamps_label(
 
 
 ConnectTarget = Callable[[UUID, UUID, UUID], None]
-# host_id, address_id, credential_id, rendered_body, mode ("new_tab"|"putty"|session_id)
-RunScriptTarget = Callable[[UUID, UUID, UUID, str, str], None]
+# host_id, address_id, credential_id, rendered_body, mode, script_id
+RunScriptTarget = Callable[[UUID, UUID, UUID, str, str, UUID], None]
 ListHostSessions = Callable[[UUID], list[tuple[UUID, str]]]  # (session_id, alias)
 
 class HostDialog(QDialog):
@@ -563,7 +563,9 @@ class HostDialog(QDialog):
             return
         self._result = saved
         self._host = saved
-        self._on_run_script(saved.id, addr_id, cred_id, rendered, dlg.mode)
+        self._on_run_script(
+            saved.id, addr_id, cred_id, rendered, dlg.mode, script.id
+        )
 
     def _save(self) -> None:
         saved = self._persist_host_fields()

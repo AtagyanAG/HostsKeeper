@@ -117,6 +117,10 @@ def _start(
     request_id: UUID | None = None,
     open_channel: Callable[[str], FakeChannel] | None = None,
     session_alive: Callable[[], bool] = lambda: True,
+    origin: ScriptRunOrigin = ScriptRunOrigin.STDIO,
+    command: str = "echo safe",
+    display_name: str = "script",
+    display_buffer: OutputBuffer | None = None,
 ) -> tuple[UUID, UUID, ScriptRunInfo]:
     session_id = session_id or uuid4()
     request_id = request_id or uuid4()
@@ -129,10 +133,12 @@ def _start(
         session_id=session_id,
         script_id=uuid4(),
         request_id=request_id,
-        origin=ScriptRunOrigin.STDIO,
-        command="echo safe",
+        origin=origin,
+        command=command,
         open_channel=open_channel or _open_channel,
         session_alive=session_alive,
+        display_name=display_name,
+        display_buffer=display_buffer,
     )
     return session_id, request_id, info
 
@@ -248,6 +254,62 @@ def test_run_output_is_bounded_sanitized_and_cursor_readable() -> None:
     safe = manager.wait(other_session, control_run.run_id, timeout_sec=1)
     assert "\x1b" not in safe.stdout.data
     assert "hello" in safe.stdout.data
+
+
+@pytest.mark.parametrize(
+    ("origin", "initiator"),
+    [
+        (ScriptRunOrigin.STDIO, "MCP client"),
+        (ScriptRunOrigin.USER_INTERFACE, "human"),
+    ],
+)
+def test_run_transcript_is_shared_and_never_echoes_script_body(
+    origin: ScriptRunOrigin, initiator: str
+) -> None:
+    manager = ScriptRunManager()
+    display_buffer = OutputBuffer()
+    channel = FakeChannel(
+        stdout=b"result line\r\n", stderr=b"warning line\r\n", exit_code=0
+    )
+    session_id, _, started = _start(
+        manager,
+        channel,
+        origin=origin,
+        command="sensitive shell body",
+        display_name="iptables-status",
+        display_buffer=display_buffer,
+    )
+
+    completed = _wait_for_state(
+        manager, session_id, started.run_id, ScriptRunState.SUCCEEDED
+    )
+    transcript = display_buffer.snapshot()
+
+    assert completed.exit_code == 0
+    assert f"Run script: iptables-status [{started.run_id}]" in transcript
+    assert f"initiator: {initiator}" in transcript
+    assert "result line\r\n" in transcript
+    assert "warning line\r\n" in transcript
+    assert f"finished: succeeded; exit_code=0" in transcript
+    assert "sensitive shell body" not in transcript
+
+
+def test_run_transcript_marks_output_truncation() -> None:
+    manager = ScriptRunManager()
+    display_buffer = OutputBuffer()
+    channel = FakeChannel(
+        stdout=b"z" * (SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM + 100),
+        exit_code=0,
+    )
+    session_id, _, started = _start(
+        manager, channel, display_buffer=display_buffer
+    )
+
+    _wait_for_state(manager, session_id, started.run_id, ScriptRunState.SUCCEEDED)
+    transcript = display_buffer.snapshot()
+
+    assert transcript.count("z") == SCRIPT_RUN_OUTPUT_MAX_CHARS_PER_STREAM
+    assert transcript.count("Run output truncated at capture limit.") == 1
 
 
 def test_wait_timeout_does_not_change_run_state() -> None:
