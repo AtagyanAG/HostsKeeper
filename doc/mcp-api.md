@@ -524,7 +524,11 @@ Approve. Отзыв MCP доступа к исходной сессии блок
 
 ### groups_list / groups_create / groups_update / groups_delete
 
-Дерево групп (`kind=scripts|hosts`). Шаблонные scripts-группы всегда; host-local группы — при включённом Host MCP.
+Дерево групп (`kind=scripts|hosts`). Для `kind=hosts` возвращаются только группы,
+содержащие доступные MCP-хосты; пустые группы и группы только с недоступными
+хостами не включаются. Родительские группы таких хостов включаются для сохранения
+иерархии `parent_id`. Для `kind=scripts` шаблонные группы доступны всегда;
+host-local группы — при включённом Host MCP.
 Поле `expanded` (UI) в ответах **не** отдаётся.  
 Create: `name`, `kind?`, `parent_id?`, `host_id?`. Update/delete по `id`. Без approve.  
 `groups_delete` — **рекурсивно** удаляет подгруппы и всё содержимое (hosts/scripts/notes).

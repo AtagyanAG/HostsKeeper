@@ -686,12 +686,20 @@ def build_mcp_server(service: McpToolService, *, name: str = "HostsKeeper") -> M
     def groups_list(
         kind: Annotated[
             Literal["scripts", "hosts"],
-            Field(description="Group tree to list; defaults to scripts."),
+            Field(
+                description=(
+                    "Group tree to list; defaults to scripts. For hosts, only "
+                    "groups containing MCP-accessible hosts are returned."
+                )
+            ),
         ] = "scripts",
     ) -> dict[str, Any]:
         """List visible groups as a tree using parent_id.
 
-        kind is scripts or hosts; host-local script groups require Host MCP access.
+        For kind=hosts, return only groups containing MCP-accessible hosts;
+        empty groups and groups containing only inaccessible hosts are omitted.
+        Ancestors of matching groups are included to preserve the tree.
+        For kind=scripts, host-local script groups require Host MCP access.
         """
         try:
             return service.groups_list(get_access(), kind=kind)

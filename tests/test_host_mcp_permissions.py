@@ -9,7 +9,26 @@ from hostskeeper.mcp.errors import McpToolError
 from hostskeeper.mcp.service import McpAccess, McpToolService
 from hostskeeper.session.manager import SessionManager, _SessionState
 from hostskeeper.session.models import SessionInfo, SessionStatus, SessionTarget
-from hostskeeper.vault import Address, Credential, Host, Note, Script, Vault
+from hostskeeper.vault import Address, Credential, Group, Host, Note, Script, Vault
+
+
+def test_groups_list_hosts_only_returns_groups_with_accessible_hosts(tmp_path) -> None:
+    vault = Vault.create(tmp_path / "host-groups.vault", "pw")
+    root = vault.add_group(Group(name="root", kind="hosts"))
+    nested = vault.add_group(Group(name="nested", kind="hosts", parent_id=root.id))
+    hidden_only = vault.add_group(Group(name="hidden", kind="hosts"))
+    vault.add_group(Group(name="empty", kind="hosts"))
+    vault.add_host(Host(name="visible", group_id=nested.id, mcp_enabled=True))
+    vault.add_host(Host(name="hidden", group_id=hidden_only.id))
+    vault.add_host(Host(name="ungrouped", mcp_enabled=True))
+    service = McpToolService(SessionManager(vault), vault)
+
+    listed = service.groups_list(McpAccess(mode="stdio"), kind="hosts")
+
+    assert [group["id"] for group in listed["groups"]] == [
+        str(root.id),
+        str(nested.id),
+    ]
 
 
 def test_host_data_and_resources_require_host_and_resource_flags(tmp_path) -> None:

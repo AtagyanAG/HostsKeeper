@@ -212,7 +212,7 @@ class HostDialog(QDialog):
 
         self._profile = QPlainTextEdit()
         self._profile.setPlaceholderText(
-            "Host notes (Markdown): OS/version, package managers, python/npm/docker, "
+            "Host description (Markdown): OS/version, package managers, python/npm/docker, "
             "last package update, and other useful facts for the AI."
         )
         self._profile.setPlainText(host.profile or "" if host else "")
@@ -242,7 +242,7 @@ class HostDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(host_page, "Host")
         tabs.addTab(self._scripts_panel, "Scripts")
-        tabs.addTab(notes_page, "Notes")
+        tabs.addTab(notes_page, "Description")
         tabs.currentChanged.connect(self._on_host_tab_changed)
 
         buttons = QDialogButtonBox(

@@ -34,6 +34,10 @@ def test_host_dialog_title_uses_host_name(
     try:
         assert edit_dialog.windowTitle() == "Alum"
         assert new_dialog.windowTitle() == "New Host"
+        assert [
+            edit_dialog._tabs.tabText(index)
+            for index in range(edit_dialog._tabs.count())
+        ] == ["Host", "Scripts", "Description"]
     finally:
         edit_dialog.close()
         new_dialog.close()

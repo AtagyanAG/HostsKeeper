@@ -975,8 +975,26 @@ class McpToolService:
         if kind not in ("hosts", "scripts"):
             raise McpToolError("invalid_args", "kind must be hosts or scripts")
         visible_hosts = self._accessible_host_ids(access)
+        source_groups = self._vault.list_groups(kind=kind)
+        if kind == "hosts":
+            groups_by_id = {group.id: group for group in source_groups}
+            visible_group_ids: set[UUID] = set()
+            for host in self._vault.list_hosts():
+                if host.id not in visible_hosts:
+                    continue
+                group_id = host.group_id
+                while group_id is not None and group_id not in visible_group_ids:
+                    group = groups_by_id.get(group_id)
+                    if group is None:
+                        break
+                    visible_group_ids.add(group_id)
+                    group_id = group.parent_id
+            source_groups = [
+                group for group in source_groups if group.id in visible_group_ids
+            ]
+
         groups = []
-        for group in self._vault.list_groups(kind=kind):
+        for group in source_groups:
             if group.host_id is not None and group.host_id not in visible_hosts:
                 continue
             if kind == "hosts" and group.host_id is not None:

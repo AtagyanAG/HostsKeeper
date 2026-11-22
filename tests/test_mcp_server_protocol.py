@@ -85,6 +85,9 @@ def test_streamable_http_metadata_errors_and_structured_results(
             for property_schema in tool["inputSchema"].get("properties", {}).values()
         )
         by_name = {tool["name"]: tool for tool in tools}
+        groups_description = " ".join(
+            by_name["groups_list"]["description"].split()
+        )
         run_description = " ".join(by_name["scripts_run"]["description"].split())
         read_description = " ".join(by_name["session_read"]["description"].split())
         subscribe_description = " ".join(
@@ -100,6 +103,7 @@ def test_streamable_http_metadata_errors_and_structured_results(
         assert by_name["session_list"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_compare"]["annotations"]["readOnlyHint"] is True
         assert by_name["scripts_validate"]["annotations"]["readOnlyHint"] is True
+        assert "groups containing MCP-accessible hosts" in groups_description
         validate_description = by_name["scripts_validate"]["description"].lower()
         assert "statically check" in validate_description
         assert "does not parse or run" in validate_description

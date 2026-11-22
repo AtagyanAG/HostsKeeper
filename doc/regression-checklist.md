@@ -2,8 +2,8 @@
 
 Автопрогон ядра Tab+MCP: `python scripts/check_tab_mcp_live.py` (при заданном `HOSTSKEEPER_TEST_SSH_KEY`).
 
-- [x] `pip install -e ".[dev]"` и `pytest` — 24 passed
-- [x] `python -m hostskeeper --version` → `HostsKeeper 0.1.1`
+- [x] `pip install -e ".[dev]"` и `pytest` — 156 passed, 5 skipped
+- [x] `python -m hostskeeper --version` → `HostsKeeper 0.1.2`
 - [x] Open Tab / echo / reconnect (headless = тот же SessionManager, что Qt) — `check_tab_mcp_live.py`
 - [x] Qt UI: Open Tab видно в вкладке, ввод с клавиатуры (ручной)
 - [x] MCP On → URL; `session_info` без IP/ключей — auto
@@ -15,7 +15,6 @@
 - [x] Lock vault очищает дерево и вкладки (ручной)
 - [x] В ответах MCP нет password/private_key/address — auto
 
-**Cursor по LAN:** ручная проверка человеком  
-(`http://<safe-ip>:8765/mcp?key=...` из **Copy MCP config**).
+- [x] Cursor по LAN (`http://<safe-ip>:8765/mcp?key=...` из **Copy MCP config**) — ручная проверка, подтверждена владельцем.
 
-Слияние в `main` — после ручных пунктов Qt + Cursor LAN.
+Сборка exe и smoke test — выполняются владельцем после изменения версии.
